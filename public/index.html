@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Transcript Mind Map</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="panel">
+        <h1>Transcript → Mind Map</h1>
+        <label class="label" for="transcript">Transcript</label>
+        <textarea id="transcript" placeholder="Paste transcript here..."></textarea>
+        <button id="generate">Generate Mind Map</button>
+        <div class="divider"></div>
+        <div class="controls">
+          <div class="row">
+            <label for="nodeType">Node type</label>
+            <select id="nodeType">
+              <option value="cause">cause</option>
+              <option value="theme" selected>theme</option>
+              <option value="hierarchy">hierarchy</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="edgeType">Edge type</label>
+            <select id="edgeType">
+              <option value="causes">causes</option>
+              <option value="relates" selected>relates</option>
+              <option value="supports">supports</option>
+              <option value="contrasts">contrasts</option>
+            </select>
+          </div>
+          <button id="addNode">Add Node</button>
+          <button id="removeNode">Remove Node</button>
+          <button id="toggleEdge">Add Edge Mode</button>
+          <button id="removeEdge">Remove Edge</button>
+          <button id="export">Export JSON</button>
+        </div>
+        <div class="status" id="status">Idle</div>
+        <div class="legend">
+          <div><span class="dot cause"></span> cause</div>
+          <div><span class="dot theme"></span> theme</div>
+          <div><span class="dot hierarchy"></span> hierarchy</div>
+        </div>
+        <p class="hint">
+          Click a node to select. Double‑click to edit label. Use “Add Edge Mode” then
+          click source and target nodes.
+        </p>
+      </aside>
+      <main class="canvas">
+        <svg id="graph"></svg>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>
