@@ -34,72 +34,102 @@ async function sampleTree() {
   );
 }
 
-test("the centre sits at the origin", async () => {
-  const { radialLayout } = await load("layout.js");
-  const placed = radialLayout(await sampleTree(), { sizeOf });
+/** A centre and a single chain hanging off it: r -> a -> b -> c. */
+async function chainTree() {
+  const { buildTree } = await load("tree.js");
+  return buildTree(
+    [node("r", "Centre"), node("a", "A"), node("b", "B"), node("c", "C")],
+    [edge("e1", "r", "a"), edge("e2", "a", "b"), edge("e3", "b", "c")]
+  );
+}
 
-  assert.ok(Math.abs(placed.get("r").x) < 1e-9);
-  assert.ok(Math.abs(placed.get("r").y) < 1e-9);
-  assert.equal(placed.get("r").radius, 0);
+test("the centre sits at the origin", async () => {
+  const { wingLayout } = await load("layout.js");
+  const placed = wingLayout(await sampleTree(), { sizeOf });
+
+  assert.equal(placed.get("r").x, 0);
+  assert.equal(placed.get("r").y, 0);
 });
 
-test("every node sits further out than its parent", async () => {
-  const { radialLayout } = await load("layout.js");
+test("the branches are shared out between the two wings", async () => {
+  const { wingLayout } = await load("layout.js");
   const tree = await sampleTree();
-  const placed = radialLayout(tree, { sizeOf });
+  const placed = wingLayout(tree, { sizeOf });
 
-  // Distances are measured branch by branch rather than per ring, so two
-  // siblings need not share a radius — but a child is always outside its
-  // parent, or a branch would fold back over the centre.
+  const sides = tree.byId.get("r").children.map((id) => placed.get(id).side);
+  assert.ok(sides.includes(1), "something goes right");
+  assert.ok(sides.includes(-1), "something goes left");
+});
+
+test("a child sits further out than its parent, on its parent's side", async () => {
+  const { wingLayout } = await load("layout.js");
+  const tree = await sampleTree();
+  const placed = wingLayout(tree, { sizeOf });
+
   tree.order.forEach((id) => {
     const { parent } = tree.byId.get(id);
     if (!parent) return;
-    assert.ok(placed.get(id).radius > placed.get(parent).radius, `${id} outside ${parent}`);
-  });
-  assert.ok(placed.get("a").radius > 0);
-});
-
-test("a branch with more leaves gets a wider slice of the circle", async () => {
-  const { radialLayout } = await load("layout.js");
-  const tree = await sampleTree();
-  const placed = radialLayout(tree, { sizeOf });
-
-  // b carries two leaves against one each for a and c, so its children sit on
-  // either side of it rather than stacked on one edge of its wedge.
-  const spread = Math.abs(placed.get("b1").angle - placed.get("b2").angle);
-  assert.ok(spread > 0);
-  assert.ok(Math.abs(placed.get("b").angle - (placed.get("b1").angle + placed.get("b2").angle) / 2) < 1e-9);
-});
-
-test("no two nodes are placed on the same point", async () => {
-  const { radialLayout } = await load("layout.js");
-  const placed = radialLayout(await sampleTree(), { sizeOf });
-
-  const seen = new Set();
-  placed.forEach(({ x, y }) => {
-    const key = `${x.toFixed(3)}:${y.toFixed(3)}`;
-    assert.equal(seen.has(key), false);
-    seen.add(key);
+    const child = placed.get(id);
+    assert.equal(child.side, placed.get(parent).side || child.side, `${id} keeps its wing`);
+    assert.ok(
+      Math.abs(child.x) > Math.abs(placed.get(parent).x),
+      `${id} is further out than ${parent}`
+    );
+    assert.ok(Math.sign(child.x) === child.side, `${id} is on its own side`);
   });
 });
 
-test("a crowded ring is pushed out far enough to hold its labels", async () => {
+test("a chain of only children folds downward instead of taking a column each", async () => {
+  const { wingLayout } = await load("layout.js");
+  const placed = wingLayout(await chainTree(), { sizeOf });
+
+  const column = Math.abs(placed.get("a").x - placed.get("r").x);
+  // Every link after the first slides sideways by an indent, not by a whole
+  // column: the width is what decides how far the map shrinks to fit.
+  assert.ok(Math.abs(placed.get("b").x - placed.get("a").x) < column / 2);
+  assert.ok(Math.abs(placed.get("c").x - placed.get("b").x) < column / 2);
+  assert.ok(placed.get("c").y > placed.get("b").y);
+  assert.ok(placed.get("b").y > placed.get("a").y);
+});
+
+test("no two labels overlap", async () => {
   const { buildTree } = await load("tree.js");
-  const { radialLayout } = await load("layout.js");
+  const { wingLayout } = await load("layout.js");
 
-  const many = Array.from({ length: 24 }, (_, i) => node(`n${i}`, `Node ${i}`));
-  const tree = buildTree(
-    [node("r", "Centre"), ...many],
-    many.map((n, i) => edge(`e${i}`, "r", n.id))
-  );
+  // A centre, eight branches, and a mix of stars and chains under them — the
+  // shape a real transcript produces, and the one the ring layout could not
+  // lay out without labels landing on top of each other.
+  const nodes = [node("r", "Centre")];
+  const edges = [];
+  for (let b = 0; b < 8; b += 1) {
+    nodes.push(node(`b${b}`, `Branch ${b}`));
+    edges.push(edge(`eb${b}`, "r", `b${b}`));
+    let tail = `b${b}`;
+    for (let i = 0; i < 4; i += 1) {
+      const id = `n${b}_${i}`;
+      nodes.push(node(id, `Node ${b}.${i}`));
+      // even branches fan out, odd ones run as a chain
+      edges.push(edge(`e${b}_${i}`, b % 2 ? tail : `b${b}`, id));
+      tail = id;
+    }
+  }
 
-  const placed = radialLayout(tree, { sizeOf });
-  const radius = placed.get("n0").radius;
-  // 24 labels of at least 40px, laid side by side, need this much circle.
-  assert.ok(2 * Math.PI * radius >= 24 * 40);
+  const tree = buildTree(nodes, edges);
+  const placed = wingLayout(tree, { sizeOf });
+  const ids = [...placed.keys()];
+
+  ids.forEach((a, i) => {
+    ids.slice(i + 1).forEach((b) => {
+      const p = placed.get(a);
+      const q = placed.get(b);
+      const apart =
+        Math.abs(p.x - q.x) >= sizeOf().w || Math.abs(p.y - q.y) >= sizeOf().h;
+      assert.ok(apart, `${a} and ${b} overlap`);
+    });
+  });
 });
 
 test("no tree, no positions", async () => {
-  const { radialLayout } = await load("layout.js");
-  assert.equal(radialLayout(null, { sizeOf }).size, 0);
+  const { wingLayout } = await load("layout.js");
+  assert.equal(wingLayout(null, { sizeOf }).size, 0);
 });

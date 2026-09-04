@@ -101,7 +101,7 @@ public/js/graph-doc.js   The saved format and its rules — shared with the serv
 public/js/session.js     The map as a document, and the localStorage autosave
 public/js/library.js     The saved-maps panel: save, open, rename, delete
 public/js/tree.js        Roots the graph: centre, branches, cross-links   (pure)
-public/js/layout.js      Radial positions, one ring per level             (pure)
+public/js/layout.js      Two-wing positions, children stacked in columns  (pure)
 public/js/geometry.js    Label wrapping and the tapered branch ribbons
 public/js/palette.js     Theme colours, and the branch hues
 public/js/graph.js       D3 map view: nodes, branches, viewport
@@ -135,7 +135,7 @@ One graph, two readings, switched with **Map** / **Notes** at the top left (or `
 Both stay rendered, so switching is instant and the PNG export always has a laid-out
 map behind it.
 
-### Map — a radial mind map
+### Map — a two-wing mind map
 
 The extractor does not hand back a tree. It hands back a handful of small chains and
 stars, one per chunk, and drawn as they are that is a scatter of pills — which is why
@@ -150,12 +150,23 @@ builds the tree first:
    transcript itself and takes the transcript's opening line as its label, unless that
    line is a speaker turn; double-click it to rename it. A graph that is already one
    component keeps its own hub as the centre and nothing is invented.
-3. **Each subtree gets a slice of the circle** proportional to how many leaves it
-   holds, and distances are measured branch by branch: a chain going straight up costs
-   its own labels' height, not the width of the widest label anywhere on that level.
-4. **An only child leans to one side**, alternating outward, because a chain that
-   inherits its parent's exact angle draws a straight spoke, and a hand-drawn map has
-   no straight spokes.
+3. **Branches are shared out between two wings**, left and right of the centre, each
+   one going to whichever wing is currently shorter — because the map an extractor
+   produces is rarely even, and a branch carrying half the transcript would otherwise
+   leave the map hanging off one edge of the screen. Inside a branch the children
+   stack downward in a column.
+4. **A chain of only children folds downward**, each link indented from the one above
+   rather than claiming a column of its own. Width is what decides how far the map has
+   to shrink to fit on screen, and a chain five deep spends five columns saying what
+   one column and five rows say just as well.
+
+A ring per level came before this and could not be made dense. Labels are wide and
+short, and a ring only grows with its radius while the disc it encloses grows with the
+square — so forty labels laid side by side around a circle pushed the outer ring far
+enough out that everything inside it was empty, and the map fit on screen at a third of
+its size with labels landing on top of each other. Stacked in columns those same labels
+waste nothing: on the same graph, a quarter of the box filled against a tenth, and no
+two labels overlapping.
 
 What that is drawn as: the centre in a filled pill, first-level branches in pills
 tinted with their own hue, everything deeper as plain text on a coloured rule — the way

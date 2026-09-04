@@ -4,11 +4,11 @@
  * What changed and why. The old canvas ran d3-force over the raw graph, so the
  * result had no centre, no levels and a different shape every run — a network
  * diagram, which is not what anyone means by a mind map. Here `tree.js` roots
- * the graph, `layout.js` places every level on its own ring, and the branches
- * are drawn as tapered ribbons carrying one colour per branch of the centre.
- * Colour therefore answers "which part of the map is this?" before a single
- * label is read, while node *type* keeps its own colour on the dot and in the
- * legend filter.
+ * the graph, `layout.js` hangs the branches off the centre in two wings, and
+ * the branches are drawn as tapered ribbons carrying one colour per branch of
+ * the centre. Colour therefore answers "which part of the map is this?" before
+ * a single label is read, while node *type* keeps its own colour on the dot and
+ * in the legend filter.
  *
  * `fitWhenSettled` survives the rewrite with the same contract — fit only once
  * the layout has stopped moving, cancelled if the user pans meanwhile — because
@@ -21,8 +21,8 @@
 
 import { state, neighboursOf, isVisible, matchesQuery } from "./state.js";
 import { buildTree, SYNTHETIC_ROOT } from "./tree.js";
-import { radialLayout } from "./layout.js";
-import { wrapLabel, borderPoint, radialControls, curvePath, ribbonPath } from "./geometry.js";
+import { wingLayout } from "./layout.js";
+import { wrapLabel, borderPoint, branchControls, curvePath, ribbonPath } from "./geometry.js";
 import { readPalette, branchColour, fade } from "./palette.js";
 
 /** Font, label width and padding per level — the centre shouts, the leaves talk. */
@@ -134,7 +134,7 @@ export function createGraph(svgEl, handlers = {}) {
       });
     });
 
-    const placed = radialLayout(tree, {
+    const placed = wingLayout(tree, {
       sizeOf: (id) => {
         const node = byId.get(id);
         return node ? { w: node.w, h: node.h } : { w: 100, h: 34 };
@@ -164,8 +164,7 @@ export function createGraph(svgEl, handlers = {}) {
     drawables.forEach((node) => {
       const spot = placed.get(node.id);
       if (!spot) return;
-      node.angle = spot.angle;
-      node.radius = spot.radius;
+      node.side = spot.side;
       // A node the user dragged keeps the position they gave it; everything
       // else goes where the layout says.
       targets.set(node.id, node.pinned ? { x: node.x, y: node.y } : { x: spot.x, y: spot.y });
@@ -218,7 +217,15 @@ export function createGraph(svgEl, handlers = {}) {
         const { wrapped, level, boxed, depth } = visuals.get(d.id);
         const g = d3.select(this);
         const corner = boxed ? d.h / 2 : 8;
-        const textLeft = -d.w / 2 + level.padX + (d.synthetic ? 0 : 12);
+        // A node in the left wing is met by its branch on the right, so its
+        // bullet and its text turn round to face it: reading outward from the
+        // centre then works the same way on both sides.
+        const mirrored = d.side < 0;
+        const inset = level.padX + (d.synthetic ? 0 : 12);
+        const textX = mirrored ? d.w / 2 - inset : -d.w / 2 + inset;
+        const bulletX = mirrored
+          ? d.w / 2 - level.padX * 0.6
+          : -d.w / 2 + level.padX * 0.6;
 
         g.select("rect.hit")
           .attr("x", -d.w / 2)
@@ -242,7 +249,7 @@ export function createGraph(svgEl, handlers = {}) {
           .attr("y2", d.h / 2 - 3)
           .attr("display", boxed ? "none" : null);
         g.select("circle.bullet")
-          .attr("cx", -d.w / 2 + level.padX * 0.6)
+          .attr("cx", bulletX)
           .attr("cy", 0)
           .attr("r", d.synthetic ? 0 : 3.6);
         g.select("title").text(d.label);
@@ -258,9 +265,9 @@ export function createGraph(svgEl, handlers = {}) {
         wrapped.lines.forEach((line, index) => {
           text
             .append("tspan")
-            .attr("x", textLeft)
+            .attr("x", textX)
             .attr("y", top + index * wrapped.lineHeight)
-            .attr("text-anchor", "start")
+            .attr("text-anchor", mirrored ? "end" : "start")
             .text(line);
         });
       });
@@ -342,7 +349,7 @@ export function createGraph(svgEl, handlers = {}) {
       const from = byId.get(d.from);
       const to = byId.get(d.to);
       if (!from || !to || !Number.isFinite(from.x) || !Number.isFinite(to.x)) return "";
-      const [c1, c2] = radialControls(from, to);
+      const [c1, c2] = branchControls(from, to);
       const start = borderPoint(from, c1.x, c1.y, 0);
       const end = borderPoint(to, c2.x, c2.y, 1);
       const depth = visuals.get(d.from)?.depth ?? 0;

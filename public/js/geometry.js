@@ -62,16 +62,26 @@ export function borderPoint(node, tx, ty, pad = 0) {
 }
 
 /**
- * Control points that keep a branch inside its own wedge: the curve leaves the
- * parent along the parent's own direction from the centre and arrives at the
- * child along the child's, which is what gives a radial map its flower shape
- * instead of a bundle of straight spokes.
+ * Control points for a branch running out to a wing. The curve leaves the
+ * parent sideways and arrives at the child sideways, so a branch and its
+ * children read as one stroke of a pen rather than as a corner.
+ *
+ * A folded chain link sits almost underneath its parent, and there the
+ * sideways stroke has nowhere to bend: it leaves downward instead and turns
+ * into the child, which is the shape an indented list already has.
  */
-export function radialControls(from, to) {
-  const midRadius = (from.radius + to.radius) / 2;
+export function branchControls(from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) < Math.abs(dy) * 0.5) {
+    return [
+      { x: from.x, y: from.y + dy * 0.55 },
+      { x: from.x + dx * 0.1, y: to.y }
+    ];
+  }
   return [
-    { x: Math.cos(from.angle) * midRadius, y: Math.sin(from.angle) * midRadius },
-    { x: Math.cos(to.angle) * midRadius, y: Math.sin(to.angle) * midRadius }
+    { x: from.x + dx * 0.5, y: from.y },
+    { x: to.x - dx * 0.5, y: to.y }
   ];
 }
 
