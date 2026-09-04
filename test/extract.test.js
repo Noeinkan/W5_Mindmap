@@ -138,6 +138,23 @@ test("a transport failure aborts the run instead of grinding through every chunk
   assert.equal(client.prompts.length, 1, "no further chunks attempted");
 });
 
+test("a transport failure mid-run keeps the chunks already done", async () => {
+  const client = fakeClient([
+    graphFor("c1_", ["EIR Problems"]),
+    new UpstreamError("Ollama request failed", "ollama_failed", "connect ECONNREFUSED")
+  ]);
+
+  const result = await extractGraph({ transcript: TRANSCRIPT, config, client });
+
+  assert.deepEqual(result.nodes.map((n) => n.label), ["EIR Problems"]);
+  assert.equal(result.partial, true);
+  assert.equal(result.warnings.length, 1);
+  assert.equal(result.warnings[0].code, "ollama_failed");
+  assert.equal(result.warnings[0].chunk, 2);
+  // Chunk 3 and the linking pass are not attempted against a model that just died.
+  assert.equal(client.prompts.length, 2);
+});
+
 test("concepts already found are fed back into the next prompt", async () => {
   const client = fakeClient([
     graphFor("c1_", ["EIR Problems"]),

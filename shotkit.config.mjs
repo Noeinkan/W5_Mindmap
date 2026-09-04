@@ -57,16 +57,15 @@ const SSE_BODY =
   `event: graph\ndata: ${JSON.stringify({ nodes: SEED.nodes, edges: SEED.edges })}\n\n` +
   `event: done\ndata: ${JSON.stringify({ chunks: 1, warnings: SEED.warnings || [] })}\n\n`;
 
-/** Paste the transcript, generate, and wait for the force layout to stop moving. */
+/** Paste the transcript, generate, and wait for the radial layout to land. */
 async function generate(page) {
   await page.fill("#transcript", TRANSCRIPT);
   await page.click("#generate");
   await page.waitForSelector("#graph g.node", { state: "visible", timeout: 30_000 });
-  // d3-force keeps ticking after the nodes appear.
-  await page.waitForTimeout(3500);
-  // The app's own fit runs on the `done` event, while the layout is still
-  // collapsed, so it lands at the 1.5 clamp and the map then spreads out past
-  // both edges of the canvas. Re-fit once the simulation has stopped.
+  // The layout is deterministic and its move is a fixed 420 ms tween, after
+  // which the app fits itself. This wait is that tween plus the fit, not a
+  // simulation cooling down.
+  await page.waitForTimeout(1600);
   await page.click("#zoomFit");
   await page.waitForTimeout(900);
   await parkPointer(page);
@@ -119,9 +118,9 @@ export default {
     {
       name: "01-map-from-transcript",
       alt:
-        "Dark two-column app: a meeting transcript in the left panel, and on the canvas ten rounded nodes joined by coloured arrows, six blue themes, three red causes and one green hierarchy node.",
+        "Dark two-column app: a meeting transcript in the left panel, and on the canvas a radial mind map — the meeting's own title in a pill at the centre, three coloured branches curving outward, each thinning towards its leaf labels.",
       shows:
-        "A meeting transcript turned into a typed knowledge graph by a model running locally — themes, causes and hierarchy laid out with d3-force and fitted to the canvas",
+        "A meeting transcript turned into a radial mind map by a model running locally: the centre is the meeting, each branch keeps one colour end to end, and the ribbons thin as they go so the trunk is obvious without a single arrowhead",
       path: "/",
       waitFor: "#graph g.node",
       async prepare(page) {
@@ -131,7 +130,7 @@ export default {
     {
       name: "02-node-inspector",
       alt:
-        "The same map with one red node, Sequencing Root Cause, and its two neighbours lit while the rest fades back; the left panel shows its label, its type chips and a delete button.",
+        "The same map with one node, Sequencing Root Cause, and its neighbours lit while the rest of the branches fade back; the left panel shows its label, its type chips and a delete button.",
       shows:
         "A node selected: the rest of the map dims to its immediate neighbourhood, and the inspector renames it, retypes it between theme / cause / hierarchy, reports its degree and offers deletion — the extraction is a starting point, not a verdict",
       path: "/",
@@ -197,13 +196,28 @@ export default {
       alt:
         "An open menu at the top right of the canvas offering two exports, JSON and PNG image, over the finished map.",
       shows:
-        "Export: the finished map leaves as JSON for another tool, or as a PNG image — nothing in the round trip leaves the machine",
+        "Export: the finished map leaves as JSON — quotes included — for another tool, or as a PNG image; nothing in the round trip leaves the machine",
       path: "/",
       waitFor: "#exportMenu",
       async prepare(page) {
         await generate(page);
         await page.click("#exportBtn");
         await page.waitForTimeout(300);
+        await parkPointer(page);
+      }
+    },
+    {
+      name: "07-notes",
+      alt:
+        "The same graph as a board of note cards: each card carries an id, a type tag, the concept as a heading, a verbatim quote from the transcript in italics, and pill-shaped links to the concepts it causes or supports.",
+      shows:
+        "The note view — the same graph read as a Zettelkasten. Every concept is one card carrying the verbatim line from the transcript that justifies it, plus its links out and its backlinks, so the map can be checked against what was actually said",
+      path: "/",
+      waitFor: ".note-card",
+      async prepare(page) {
+        await generate(page);
+        await page.click("#viewNotes");
+        await page.waitForTimeout(500);
         await parkPointer(page);
       }
     }

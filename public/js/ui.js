@@ -10,6 +10,7 @@ import {
   EDGE_TYPES,
   nodeById,
   degreeOf,
+  matchesQuery,
   typeCounts,
   canUndo,
   canRedo,
@@ -121,12 +122,22 @@ export function buildChips({ onNodeType, onEdgeType, onLegendToggle }) {
 /* ------------------------------------------------------------------ */
 
 export function syncPanels() {
+  syncView();
   syncInspector();
   syncLegend();
   syncToolbar();
   syncEmptyState();
   syncSearchCount();
   syncModeBanner();
+}
+
+function syncView() {
+  const notes = state.view === "notes";
+  el.notes.hidden = !notes;
+  el.viewMap.setAttribute("aria-selected", String(!notes));
+  el.viewNotes.setAttribute("aria-selected", String(notes));
+  // Zoom and fit belong to the canvas; the note board scrolls instead.
+  el.zoomBar.hidden = notes;
 }
 
 function syncInspector() {
@@ -190,7 +201,7 @@ function syncSearchCount() {
     el.searchCount.hidden = true;
     return;
   }
-  const hits = state.nodes.filter((n) => n.label.toLowerCase().includes(state.query));
+  const hits = state.nodes.filter(matchesQuery);
   el.searchCount.hidden = false;
   el.searchCount.textContent = `${hits.length}`;
 }

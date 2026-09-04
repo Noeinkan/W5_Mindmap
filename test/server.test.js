@@ -30,7 +30,7 @@ let appServer;
 test.before(async () => {
   upstream = http.createServer(async (req, res) => {
     const body = await readBody(req);
-    const result = handleUpstream(req.url, body);
+    const result = await handleUpstream(req.url, body);
     res.writeHead(result.status || 200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result.body !== undefined ? result.body : result));
   });
@@ -42,6 +42,8 @@ test.before(async () => {
   process.env.TRANSCRIPT_CHUNK_OVERLAP_LINES = "0";
   process.env.OLLAMA_RETRIES = "0";
   process.env.CHUNK_PARSE_RETRIES = "0";
+  // Real runs heartbeat every 10 s; here we want a ping inside a 150 ms test.
+  process.env.SSE_HEARTBEAT_MS = "25";
 
   ({ app } = require("../server"));
   appServer = http.createServer(app);
@@ -196,11 +198,55 @@ test("the stream skips a botched chunk and reports it as a warning", async () =>
   assert.equal(events[events.length - 1].event, "done");
 });
 
+test("a slow model still puts bytes on the wire, so the browser knows it is alive", async () => {
+  handleUpstream = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    return { body: graphResponse(["EIR Problems"], "c1_") };
+  };
+
+  const text = await fetch(`${baseUrl}/api/extract/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript: TRANSCRIPT })
+  }).then((r) => r.text());
+
+  assert.ok(/^: ping /m.test(text), "no heartbeat in the stream");
+  // The comment is a heartbeat, not an event: the parser must not see it as one.
+  const events = parseSse(text);
+  assert.equal(events[events.length - 1].event, "done");
+});
+
+test("a mid-run Ollama failure ends in done-with-warning, keeping the partial map", async () => {
+  let call = 0;
+  handleUpstream = () => {
+    call += 1;
+    return call === 1
+      ? { body: graphResponse(["EIR Problems"], "c1_") }
+      : { status: 500, body: { error: "boom" } };
+  };
+
+  const text = await fetch(`${baseUrl}/api/extract/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript: TRANSCRIPT })
+  }).then((r) => r.text());
+
+  const events = parseSse(text);
+  const last = events[events.length - 1];
+
+  assert.equal(events.filter((e) => e.event === "error").length, 0);
+  assert.equal(events.filter((e) => e.event === "graph").length, 1);
+  assert.equal(last.event, "done");
+  assert.equal(last.data.partial, true);
+  assert.equal(last.data.warnings.length, 1);
+  assert.equal(last.data.warnings[0].code, "ollama_failed");
+});
+
 function parseSse(text) {
   return text
     .split("\n\n")
     .map((block) => block.trim())
-    .filter(Boolean)
+    .filter((block) => block && !block.startsWith(":"))
     .map((block) => {
       const event = (block.match(/^event: (.*)$/m) || [])[1];
       const data = (block.match(/^data: (.*)$/m) || [])[1];

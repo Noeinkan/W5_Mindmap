@@ -17,9 +17,14 @@ import {
   nodeById,
   setGraph,
   emit,
+  setView,
+  setTitle,
+  unpinAll,
+  matchesQuery,
   normalizeNodeType,
   normalizeEdgeType
 } from "./state.js";
+import { SYNTHETIC_ROOT } from "./tree.js";
 import { generateMindMap, loadSampleTranscript } from "./api.js";
 import { exportJson, exportPng } from "./exporters.js";
 import {
@@ -36,11 +41,26 @@ import {
   isInlineEditorOpen,
   syncPanels
 } from "./ui.js";
+import {
+  initLog,
+  logLine,
+  logRunStart,
+  logServerEvent,
+  toggleLogPanel,
+  toggleExpanded,
+  isLogExpanded
+} from "./log.js";
 
-export function connectController(graph) {
+export function connectController(graph, notes) {
   /* ---------------------------- Graph gestures --------------------- */
 
   function onNodeClick(node) {
+    // The centre of a map with several branches stands for the transcript, not
+    // for a concept: there is nothing to select or connect.
+    if (node.id === SYNTHETIC_ROOT) {
+      clearSelection();
+      return;
+    }
     if (state.connectMode) {
       handleConnectClick(node);
       return;
@@ -68,22 +88,18 @@ export function connectController(graph) {
   }
 
   function editNode(node) {
-    node.fx = node.x;
-    node.fy = node.y;
+    // Renaming the centre renames the map, not a node: it is the one label on
+    // the canvas that has no row in the graph.
+    if (node.id === SYNTHETIC_ROOT) {
+      openInlineEditor(node, graph, (label) => setTitle(label));
+      return;
+    }
     openInlineEditor(node, graph, (label) => {
       withHistory(() => {
         const target = nodeById(node.id);
         if (target) target.label = label;
       });
     });
-    const release = () => {
-      node.fx = null;
-      node.fy = null;
-    };
-    setTimeout(function check() {
-      if (isInlineEditorOpen()) setTimeout(check, 120);
-      else release();
-    }, 120);
   }
 
   /* ---------------------------- Actions ---------------------------- */
@@ -125,33 +141,76 @@ export function connectController(graph) {
 
     setBusy(true);
     setStatus("Sending the transcript to the model…", "busy");
+    logRunStart(transcript.length);
+    // The centre of the map is the meeting itself, so it gets the meeting's own
+    // first line where there is one. Double-click it to say something better.
+    const derived = titleFromTranscript(transcript);
+    if (derived) state.title = derived;
     let received = false;
 
     await generateMindMap(transcript, {
       onStatus: (message) => setStatus(message, "busy"),
+      // The status line shows the latest step; the log keeps all of them, with
+      // the chunk numbers, timings and warning codes the line has no room for.
+      onEvent: logServerEvent,
       onGraph: (data) => {
         received = true;
         withHistory(() => setGraph(data));
         setStatus("Building the map…", "busy");
       },
-      onDone: () => {
+      onDone: (result = {}) => {
         setBusy(false);
+        const warnings = result.warnings || [];
+        const summary = `${state.nodes.length} nodes, ${state.edges.length} connections`;
         setStatus(
-          `Done — ${state.nodes.length} nodes, ${state.edges.length} connections`,
-          "ok"
+          result.partial ? `Stopped early — ${summary} from part of the transcript` : `Done — ${summary}`,
+          result.partial ? "error" : "ok"
         );
         if (received) {
-          graph.fit();
-          toast("Mind map ready", "ok");
+          graph.fitWhenSettled();
+          // What the canvas ended up with, which is not always what the server
+          // counted: merging and sanitising happen on this side too.
+          logLine(`Map drawn — ${summary}`, "info");
+          // Warnings are chunks the model fumbled or never reached. Dropping them
+          // silently is how a map loses a third of the meeting with no clue why.
+          if (warnings.length) {
+            toast(
+              `${warnings.length} chunk${warnings.length > 1 ? "s" : ""} skipped — ${warnings[0].message}`,
+              "error",
+              5200
+            );
+          } else {
+            toast("Mind map ready", "ok");
+          }
         }
       },
-      onError: (message) => {
+      onError: (message, meta = {}) => {
         setBusy(false);
         setStatus(message, "error");
+        if (meta.partial && received) {
+          graph.fitWhenSettled();
+          toast("Partial map kept — see the message above", "error", 4600);
+          return;
+        }
         toast("Extraction failed", "error", 3600);
       }
     });
     setBusy(false);
+  }
+
+  /**
+   * A heading for the map, taken from the transcript's opening line — but only
+   * when that line is a heading. A transcript that opens on a speaker turn
+   * ("PM: The main worry is…") has none, and half a sentence in the middle of
+   * the canvas is worse than the neutral default.
+   */
+  function titleFromTranscript(text) {
+    const first = text.split("\n").find((line) => line.trim());
+    if (!first || /^[A-Za-z][\w .]{0,14}:/.test(first.trim())) return null;
+    const sentence = first.trim().split(/(?<=[.!?])\s/)[0].replace(/[.!?]+$/, "");
+    if (sentence.length <= 44) return sentence;
+    const cut = sentence.slice(0, 44);
+    return cut.slice(0, cut.lastIndexOf(" ")).replace(/[,;:–—-]+$/, "");
   }
 
   async function useSample() {
@@ -159,6 +218,7 @@ export function connectController(graph) {
       el.transcript.value = await loadSampleTranscript();
       updateCharCount();
       setStatus("Sample transcript loaded — hit Generate", "idle");
+      logLine(`Sample transcript loaded — ${el.transcript.value.length.toLocaleString()} characters`, "info");
       el.transcript.focus();
     } catch {
       setStatus("Sample transcript could not be loaded", "error");
@@ -187,8 +247,14 @@ export function connectController(graph) {
     onLegendToggle: (type) => toggleTypeVisibility(type)
   });
 
-  initTheme(() => graph.refreshTheme());
+  // Both views read their colours from the CSS custom properties, so a theme
+  // change is a redraw for each of them.
+  initTheme(() => {
+    graph.refreshTheme();
+    notes.render();
+  });
   initSidebar(() => graph.resize());
+  initLog({ notify: toast });
 
   el.generate.addEventListener("click", generate);
   el.loadSample.addEventListener("click", useSample);
@@ -244,12 +310,19 @@ export function connectController(graph) {
       return;
     }
     if (event.key !== "Enter" || !state.query) return;
-    const hit = state.nodes.find((n) => n.label.toLowerCase().includes(state.query));
-    if (hit) {
-      select("node", hit.id);
-      graph.centreOn(hit);
-    }
+    const hit = state.nodes.find(matchesQuery);
+    if (hit) reveal(hit);
   });
+
+  /** Brings a node into view in whichever view is on screen. */
+  function reveal(node) {
+    select("node", node.id);
+    if (state.view === "notes") notes.focus(node.id);
+    else graph.centreOn(node);
+  }
+
+  el.viewMap.addEventListener("click", () => setView("map"));
+  el.viewNotes.addEventListener("click", () => setView("notes"));
 
   el.zoomIn.addEventListener("click", graph.zoomIn);
   el.zoomOut.addEventListener("click", graph.zoomOut);
@@ -307,6 +380,8 @@ export function connectController(graph) {
     if (event.key === "Escape") {
       if (isInlineEditorOpen()) return dismissInlineEditor();
       if (!el.exportMenu.hidden) return closeExportMenu();
+      // Expanded, the log covers the canvas: Escape has to give the map back.
+      if (isLogExpanded()) return toggleExpanded(false);
       if (state.connectMode) return setConnectMode(false);
       return clearSelection();
     }
@@ -329,6 +404,22 @@ export function connectController(graph) {
         break;
       case "f":
         graph.fit();
+        break;
+      case "v":
+        setView(state.view === "map" ? "notes" : "map");
+        break;
+      case "r": {
+        // Hands every hand-placed node back to the radial layout.
+        const pinned = unpinAll();
+        graph.render();
+        graph.fitWhenSettled();
+        toast(pinned ? `Layout redrawn — ${pinned} node${pinned > 1 ? "s" : ""} released` : "Layout redrawn");
+        break;
+      }
+      case "l":
+        // Shift+L throws the log over the canvas, where long lines fit.
+        if (event.shiftKey) toggleExpanded();
+        else toggleLogPanel();
         break;
       case "/":
         event.preventDefault();
@@ -356,6 +447,15 @@ export function connectController(graph) {
   return {
     onNodeClick,
     onNodeDoubleClick: editNode,
+    // A card is a node: clicking one selects it, and picks it up in connect
+    // mode exactly as clicking it on the canvas would.
+    onNoteSelect: onNodeClick,
+    onNoteFollow: (node) => reveal(node),
+    onNoteEdit: (node) => {
+      select("node", node.id);
+      el.nodeLabel.focus();
+      el.nodeLabel.select();
+    },
     onEdgeClick: (edge) => select("edge", edge.id),
     onBackgroundClick: () => {
       if (state.pendingSourceId) {

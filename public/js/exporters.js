@@ -1,7 +1,7 @@
 /** Download helpers: the graph as JSON, or the canvas as a PNG image. */
 
 import { state } from "./state.js";
-import { readPalette } from "./graph.js";
+import { readPalette } from "./palette.js";
 
 function download(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -15,7 +15,10 @@ function download(blob, filename) {
 export function exportJson() {
   const payload = JSON.stringify(
     {
-      nodes: state.nodes.map(({ id, label, type }) => ({ id, label, type })),
+      title: state.title,
+      // The quote is what the note view shows and what makes an exported graph
+      // worth re-reading, so it leaves with the rest of the node.
+      nodes: state.nodes.map(({ id, label, type, quote }) => ({ id, label, type, quote })),
       edges: state.edges.map(({ id, from, to, type }) => ({ id, from, to, type }))
     },
     null,

@@ -18,6 +18,18 @@
   --e-supports: #4ade80;
   --e-contrasts: #f472b6;
 
+  /* Branch hues. A mind map is found by colour before it is read, and what has
+     to be findable is the branch — the whole limb hanging off the centre — not
+     the node type, which keeps its own colours above and in the legend. */
+  --b1: #a78bfa;
+  --b2: #22d3ee;
+  --b3: #fbbf24;
+  --b4: #fb7185;
+  --b5: #34d399;
+  --b6: #60a5fa;
+  --b7: #a3e635;
+  --b8: #fb923c;
+
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -76,6 +88,14 @@
   --e-relates: #64748b;
   --e-supports: #16a34a;
   --e-contrasts: #db2777;
+  --b1: #7c3aed;
+  --b2: #0e7490;
+  --b3: #b45309;
+  --b4: #e11d48;
+  --b5: #047857;
+  --b6: #1d4ed8;
+  --b7: #4d7c0f;
+  --b8: #c2410c;
   --shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
   --shadow-sm: 0 1px 4px rgba(15, 23, 42, 0.1);
 }
@@ -579,8 +599,9 @@ select {
   color: var(--text-faint);
 }
 
-/* Shortcuts */
-.shortcuts summary {
+/* Foldable blocks (shortcuts, activity log) */
+.shortcuts summary,
+.foldable summary {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.09em;
@@ -588,20 +609,26 @@ select {
   color: var(--text-dim);
   cursor: pointer;
   list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.shortcuts summary::-webkit-details-marker {
+.shortcuts summary::-webkit-details-marker,
+.foldable summary::-webkit-details-marker {
   display: none;
 }
 
-.shortcuts summary::before {
+.shortcuts summary::before,
+.foldable summary::before {
   content: "▸";
   display: inline-block;
   margin-right: 6px;
   transition: transform 0.15s var(--ease);
 }
 
-.shortcuts[open] summary::before {
+.shortcuts[open] summary::before,
+.foldable[open] summary::before {
   transform: rotate(90deg);
 }
 
@@ -628,6 +655,138 @@ select {
 .shortcuts dd {
   margin: 0;
   color: var(--text-dim);
+}
+
+/* ============================================================
+   Activity log
+   ============================================================ */
+.log-badge {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+.log-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.log-list {
+  /* Tall enough for a couple of chunks, draggable when that is not enough. */
+  flex: none;
+  height: 190px;
+  min-height: 64px;
+  overflow: auto;
+  resize: vertical;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overscroll-behavior: contain;
+}
+
+.log-empty {
+  margin: 0;
+  color: var(--text-faint);
+}
+
+.log-row {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  border-top: 1px solid var(--border);
+}
+
+.log-row:first-child {
+  border-top: 0;
+}
+
+.log-time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  padding-top: 1px;
+}
+
+.log-body {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.log-text {
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+/* The colour carries the outcome, so a run can be skimmed for the red line. */
+.log-row[data-kind="start"] .log-text {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.log-row[data-kind="model"] .log-text {
+  color: var(--c-theme);
+}
+
+.log-row[data-kind="ok"] .log-text {
+  color: var(--ok);
+}
+
+.log-row[data-kind="warn"] .log-text {
+  color: var(--warn);
+}
+
+.log-row[data-kind="error"] .log-text {
+  color: var(--danger);
+}
+
+.log-detail {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
+/* Expanded: the log leaves the sidebar and floats over the canvas, because a
+   long line of model output is unreadable in a 320px column. */
+.logbox.expanded {
+  position: fixed;
+  z-index: 60;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  width: min(560px, calc(100vw - 380px));
+  display: flex;
+  flex-direction: column;
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+}
+
+/* Not `flex: 1`: Chrome puts the open content of a <details> inside its own
+   ::details-content box, so the list is not a flex item of the panel and would
+   never stretch. Measuring against the viewport always works. */
+.logbox.expanded .log-list {
+  height: calc(100vh - 118px);
+  resize: none;
+}
+
+@media (max-width: 900px) {
+  .logbox.expanded {
+    left: 16px;
+    width: auto;
+  }
 }
 
 /* ============================================================
@@ -701,6 +860,49 @@ select {
   height: 20px;
   margin: 0 3px;
   background: var(--border);
+}
+
+/* Map / notes switch. Two renderings of one graph, so it is a switch between
+   equals rather than a mode you enter and leave. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-sm);
+}
+
+.segmented .seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.segmented .seg svg {
+  width: 15px;
+  height: 15px;
+}
+
+.segmented .seg:hover {
+  color: var(--text);
+}
+
+.segmented .seg[aria-selected="true"] {
+  color: var(--accent-fg);
+  background: var(--accent);
 }
 
 .zoom-level {

@@ -52,6 +52,9 @@ app.post("/api/extract/stream", async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
+  // nginx buffers a proxied response by default, which would hold every event back
+  // until the run ends — turning a streaming map into a two-minute blank screen.
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
 
   // The response socket closing is what tells us the browser walked away; the
@@ -67,8 +70,19 @@ app.post("/api/extract/stream", async (req, res) => {
     res.write(`data: ${JSON.stringify({ ...data, requestId })}\n\n`);
   };
 
+  // One chunk keeps the model busy for tens of seconds with nothing to report. An
+  // SSE comment every few seconds is what tells the browser the silence is work and
+  // not a dead server; unref'd so it never holds the process open.
+  const heartbeat = setInterval(() => {
+    if (res.writableEnded || cancelled) return;
+    res.write(`: ping ${Date.now()}\n\n`);
+  }, config.sseHeartbeatMs);
+  heartbeat.unref?.();
+  res.on("close", () => clearInterval(heartbeat));
+
   const transcript = String((req.body && req.body.transcript) || "").trim();
   if (!transcript) {
+    clearInterval(heartbeat);
     sendEvent("error", { error: "Transcript is required.", code: "bad_request" });
     return res.end();
   }
@@ -84,7 +98,12 @@ app.post("/api/extract/stream", async (req, res) => {
         sendEvent(type, data);
       }
     });
-    sendEvent("done", { warnings: result.warnings, chunks: result.chunks });
+    sendEvent("done", {
+      warnings: result.warnings,
+      chunks: result.chunks,
+      partial: result.partial,
+      ms: result.ms
+    });
     res.end();
   } catch (err) {
     if (err instanceof UpstreamError) {
@@ -101,6 +120,8 @@ app.post("/api/extract/stream", async (req, res) => {
       code: "server_error"
     });
     res.end();
+  } finally {
+    clearInterval(heartbeat);
   }
 });
 

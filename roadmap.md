@@ -69,7 +69,7 @@ sistemato a mano si perde al reload.
 - [ ] 5.2 Undo e redo delle modifiche al grafo <!-- size: M -->
 - [ ] 5.3 Ricerca di un nodo per etichetta, con evidenziazione <!-- size: M -->
 - [ ] 5.4 Filtri per tipo di nodo e di arco <!-- size: M -->
-- [ ] 5.5 Etichette che si scansano invece di sovrapporsi al centro del canvas <!-- size: M -->
+- [x] 5.5 Etichette che si scansano invece di sovrapporsi al centro del canvas <!-- size: M; done: 2026-09-04 -->
 - [ ] 5.6 Legenda dei tipi di nodo e di arco <!-- size: S -->
 - [ ] 5.7 Export PNG o SVG del grafo disegnato <!-- size: S -->
 - [ ] 5.8 D3 servito in locale invece che da d3js.org, cosi' l'app funziona offline <!-- size: S -->
@@ -81,3 +81,20 @@ sistemato a mano si perde al reload.
 - [ ] 6.3 Workflow GitHub Actions che lancia i test a ogni push <!-- size: S -->
 - [ ] 6.4 Script start portabile: oggi passa da PowerShell e gira solo su Windows <!-- size: S -->
 - [ ] 6.5 CHANGELOG.md, cosi' che la dashboard mostri l'ultima release <!-- size: S -->
+
+## 7. Resa: mappa radiale e note <!-- due: 2026-09-04 -->
+
+Il force layout non produceva una mind map ma un grafo a nuvola: nessun centro,
+nessun livello, una forma diversa a ogni run. E la citazione estratta dal
+transcript, la cosa piu' utile del pipeline, finiva solo nel JSON.
+
+- [x] 7.1 Radicare il grafo: testa di catena per componente, centro sintetico quando i componenti sono piu' di uno <!-- size: M; done: 2026-09-04 -->
+- [x] 7.2 Layout radiale deterministico al posto di d3-force, con fetta angolare proporzionale alle foglie <!-- size: L; done: 2026-09-04 -->
+- [x] 7.3 Rami come nastri rastremati e colore per ramo, tipo del nodo sul pallino e in legenda <!-- size: M; done: 2026-09-04 -->
+- [x] 7.4 Etichette mandate a capo su piu' righe invece che troncate <!-- size: S; done: 2026-09-04 -->
+- [x] 7.5 Archi fuori dall'albero disegnati come cross-link tratteggiati, non scartati <!-- size: S; done: 2026-09-04 -->
+- [x] 7.6 Vista note: una scheda per concetto con id, citazione verbatim, link uscenti e backlink <!-- size: L; done: 2026-09-04 -->
+- [x] 7.7 Selettore Mappa / Note in toolbar e da tastiera, con selezione condivisa fra le due viste <!-- size: M; done: 2026-09-04 -->
+- [x] 7.8 Test su tree.js e layout.js, importati da Node senza build <!-- size: M; done: 2026-09-04 -->
+- [ ] 7.9 Titolo del centro salvato insieme al grafo, oggi si perde al reload <!-- size: S -->
+- [ ] 7.10 Ricerca che evidenzia anche le citazioni nella vista mappa, non solo nelle note <!-- size: S -->

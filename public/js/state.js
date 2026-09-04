@@ -7,6 +7,8 @@
 export const NODE_TYPES = ["theme", "cause", "hierarchy"];
 export const EDGE_TYPES = ["relates", "causes", "supports", "contrasts"];
 
+export const VIEWS = ["map", "notes"];
+
 export const state = {
   nodes: [],
   edges: [],
@@ -16,6 +18,10 @@ export const state = {
   pendingSourceId: null,
   hiddenTypes: new Set(),
   query: "",
+  /** Which renderer owns the canvas: the radial map, or the note cards. */
+  view: "map",
+  /** Label of the map's centre when the graph has no single natural root. */
+  title: "Central topic",
   nextNodeId: 1,
   nextEdgeId: 1
 };
@@ -40,22 +46,29 @@ export function emit(reason = "update") {
 
 function snapshot() {
   return {
+    // `quote` and `pinned` travel with the snapshot: the first is the whole
+    // content of a note card, the second is a position the user placed by hand.
+    // Undo used to drop both, so one Ctrl+Z emptied every card on screen.
     nodes: state.nodes.map((n) => ({
       id: n.id,
       label: n.label,
       type: n.type,
+      quote: n.quote,
       x: n.x,
-      y: n.y
+      y: n.y,
+      pinned: n.pinned
     })),
     edges: state.edges.map((e) => ({ ...e })),
+    title: state.title,
     nextNodeId: state.nextNodeId,
     nextEdgeId: state.nextEdgeId
   };
 }
 
 function restore(snap) {
-  state.nodes = snap.nodes.map((n) => ({ ...n, vx: 0, vy: 0 }));
+  state.nodes = snap.nodes.map((n) => ({ ...n }));
   state.edges = snap.edges.map((e) => ({ ...e }));
+  state.title = snap.title;
   state.nextNodeId = snap.nextNodeId;
   state.nextEdgeId = snap.nextEdgeId;
   if (state.selection && !findSelected()) state.selection = null;
@@ -145,6 +158,17 @@ export function setConnectMode(on) {
   emit("mode");
 }
 
+export function setView(view) {
+  if (!VIEWS.includes(view) || state.view === view) return;
+  state.view = view;
+  emit("view");
+}
+
+export function setTitle(title) {
+  state.title = String(title || "").trim() || "Central topic";
+  emit("graph");
+}
+
 export function setQuery(q) {
   state.query = q.trim().toLowerCase();
   emit("filter");
@@ -157,6 +181,24 @@ export function toggleTypeVisibility(type) {
 }
 
 export const isVisible = (node) => !state.hiddenTypes.has(node.type);
+
+/**
+ * Search hits. The note view puts the transcript quote on screen, so a search
+ * that only looked at labels would dim a card whose visible text holds the word.
+ */
+export function matchesQuery(node) {
+  if (!state.query) return true;
+  if (node.label.toLowerCase().includes(state.query)) return true;
+  return state.view === "notes" && (node.quote || "").toLowerCase().includes(state.query);
+}
+
+/** Edges in and out of a node, kept apart — a note card lists them separately. */
+export function linksOf(nodeId) {
+  return {
+    out: state.edges.filter((e) => e.from === nodeId),
+    in: state.edges.filter((e) => e.to === nodeId)
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* Normalisation                                                       */
@@ -197,7 +239,11 @@ export function setGraph(data) {
       id,
       label: String(n.label || "Untitled"),
       type: normalizeNodeType(n.type),
-      ...(old ? { x: old.x, y: old.y, vx: old.vx, vy: old.vy } : {})
+      // The verbatim span the model copied out of the transcript. It is the
+      // body of the note card, so it has to survive the trip into state.
+      quote: typeof n.quote === "string" ? n.quote.trim() : old?.quote || "",
+      mentions: Number(n.mentions) || old?.mentions || 1,
+      ...(old ? { x: old.x, y: old.y, pinned: old.pinned } : {})
     };
   });
 
@@ -225,8 +271,12 @@ export function addNode(label, type, { x, y, connectToSelection = true } = {}) {
     id: `n${state.nextNodeId++}`,
     label: label.trim(),
     type: normalizeNodeType(type),
+    quote: "",
+    mentions: 1,
     x,
-    y
+    y,
+    // Dropped at a point the user chose, so the radial layout leaves it there.
+    pinned: Number.isFinite(x) && Number.isFinite(y)
   };
   state.nodes.push(node);
 
@@ -242,6 +292,16 @@ export function addNode(label, type, { x, y, connectToSelection = true } = {}) {
 
   state.selection = { kind: "node", id: node.id };
   return node;
+}
+
+/** Hands every node back to the layout, dropping the positions set by dragging. */
+export function unpinAll() {
+  let pinned = 0;
+  state.nodes.forEach((n) => {
+    if (n.pinned) pinned += 1;
+    n.pinned = false;
+  });
+  return pinned;
 }
 
 export function addEdge(fromId, toId, type) {
