@@ -1,0 +1,45 @@
+Client kickoff, Northgate Interchange, information management. Attendees: client project manager, design lead, information manager.
+
+PM: The main worry is that the last two projects both slipped at handover. Nobody could tell us whether the model was actually complete against what we asked for.
+
+IM: That is usually an EIR problem rather than a model problem. If the exchange information requirements do not name the deliverables, the responsibility matrix has nothing to point at, and the delivery team fills the gap with assumptions.
+
+Design lead: We had a BEP, but it was written after the contract was signed, so it described what we were already doing rather than what the client needed.
+
+IM: Then the sequencing is the root cause. Pre-appointment BEP, then the responsibility matrix, then the TIDPs, then the MIDP. If the MIDP is assembled last from the TIDPs, every date on it is one a supplier has actually committed to.
+
+PM: What breaks first when that sequencing is skipped?
+
+IM: Naming. The CDE ends up with three conventions running at once, and suitability codes stop meaning anything, so approvals get given on files that were never checked. After that, the federated model stops being trustworthy and coordination reverts to email.
+
+Design lead: The supply chain is also uneven. Two of the specialists have no BIM capability at all.
+
+IM: Then the capability assessment has to happen before appointment, not after. Where capability is missing, the information gets produced by someone else, and the responsibility matrix has to say so explicitly.
+
+PM: And on the client side?
+
+IM: The OIR and the AIR drive the EIR. If the asset team cannot say what data they need to operate the building, the EIR will ask for geometry and get geometry, and the operations team will be back to spreadsheets on day one.
+
+PM: We have an asset register from the last scheme. Can that be reused?
+
+IM: Only as a starting point. It was built around the maintenance contract, not around the systems, so half the attributes describe who services an asset rather than what it is. Reused unchanged, it will encode the old contract into the new building.
+
+Design lead: What does that mean for the model authors day to day?
+
+IM: Less than people fear. If the classification and the property sets are agreed at the start, authoring is the same work with a naming discipline on top. What changes is checking: the model gets validated against the requirements before it moves suitability, not after somebody complains.
+
+PM: Who owns that check?
+
+IM: The task team owns their own check, the lead appointed party owns the federated check, and the client owns acceptance. Three checks, three different questions. Collapsing them into one is what produces the handover we started this meeting talking about.
+
+Design lead: Timing? The programme has the first data drop eight weeks out.
+
+IM: Eight weeks is enough for the pre-appointment BEP and the capability assessment, but not for a rewritten asset information requirement. I would rather the first drop carries fewer attributes and every one of them is defined than carries the full set half-populated.
+
+PM: Risk if we do nothing?
+
+IM: The same as last time, but more expensive, because operations now expect a data handover contractually. A model that cannot be validated becomes a change order at the end of the job.
+
+PM: So the immediate actions are: rewrite the EIR against the asset information requirements, run a capability assessment across the supply chain, and hold the pre-appointment BEP as a gate before any appointment is signed.
+
+IM: And agree the CDE naming convention this month, before three of them exist.
