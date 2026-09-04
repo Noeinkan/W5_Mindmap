@@ -146,7 +146,10 @@ async function describeFailure(response) {
   try {
     const json = JSON.parse(text);
     message = json.error || message;
-    if (json.details) extras += ` (${json.details})`;
+    // The saved-map routes answer with a list of reasons, one per broken field.
+    if (json.details) {
+      extras += ` (${Array.isArray(json.details) ? json.details.join(" ") : json.details})`;
+    }
     if (json.code) extras += ` [${json.code}]`;
   } catch {
     if (text) message = text;
@@ -225,3 +228,41 @@ export async function loadSampleTranscript() {
   if (!response.ok) throw new Error("Sample transcript not available");
   return response.text();
 }
+
+/* ------------------------------------------------------------------ */
+/* Saved maps                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One request against /api/graphs. Everything here is small and local — a few
+ * kilobytes to a server on the same machine — so none of it gets the streaming
+ * treatment above; what it does need is the failure turned into a sentence a
+ * toast can show.
+ */
+async function request(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) throw new Error(await describeFailure(response));
+  return response.json();
+}
+
+const sending = (method, body) => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body)
+});
+
+const graphUrl = (id) => `/api/graphs/${encodeURIComponent(id)}`;
+
+/** @returns {Promise<{graphs: Array<{id, title, nodeCount, edgeCount, updatedAt}>}>} */
+export const listGraphs = () => request("/api/graphs");
+
+export const readGraph = (id) => request(graphUrl(id));
+
+export const createGraph = (doc) => request("/api/graphs", sending("POST", doc));
+
+/** Save over a map already in the library. */
+export const replaceGraph = (id, doc) => request(graphUrl(id), sending("PUT", doc));
+
+export const renameGraph = (id, title) => request(graphUrl(id), sending("PATCH", { title }));
+
+export const deleteGraph = (id) => request(graphUrl(id), { method: "DELETE" });

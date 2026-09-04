@@ -4,8 +4,19 @@
  * `withHistory` so Ctrl+Z always has something to fall back to.
  */
 
-export const NODE_TYPES = ["theme", "cause", "hierarchy"];
-export const EDGE_TYPES = ["relates", "causes", "supports", "contrasts"];
+import {
+  NODE_TYPES,
+  EDGE_TYPES,
+  DEFAULT_TITLE,
+  normalizeNodeType,
+  normalizeEdgeType
+} from "./graph-doc.js";
+
+// The type lists and their fallbacks belong to the saved format, not to this
+// module: a map that comes back from a file has to normalise to exactly what the
+// live graph normalises to. Re-exported so the rest of the app still reads them
+// from the state it is already importing.
+export { NODE_TYPES, EDGE_TYPES, normalizeNodeType, normalizeEdgeType };
 
 export const VIEWS = ["map", "notes"];
 
@@ -21,7 +32,13 @@ export const state = {
   /** Which renderer owns the canvas: the radial map, or the note cards. */
   view: "map",
   /** Label of the map's centre when the graph has no single natural root. */
-  title: "Central topic",
+  title: DEFAULT_TITLE,
+  /**
+   * The transcript the map was built from. It lives here rather than only in the
+   * textarea because it travels with the saved map: a graph without the words it
+   * came from cannot be checked against them later.
+   */
+  transcript: "",
   nextNodeId: 1,
   nextEdgeId: 1
 };
@@ -60,6 +77,10 @@ function snapshot() {
     })),
     edges: state.edges.map((e) => ({ ...e })),
     title: state.title,
+    // Opening a file replaces the transcript along with the map, so undoing that
+    // has to put both back. Typing in the box takes no snapshot of its own, so
+    // this never fights the user mid-sentence.
+    transcript: state.transcript,
     nextNodeId: state.nextNodeId,
     nextEdgeId: state.nextEdgeId
   };
@@ -69,6 +90,7 @@ function restore(snap) {
   state.nodes = snap.nodes.map((n) => ({ ...n }));
   state.edges = snap.edges.map((e) => ({ ...e }));
   state.title = snap.title;
+  state.transcript = snap.transcript ?? state.transcript;
   state.nextNodeId = snap.nextNodeId;
   state.nextEdgeId = snap.nextEdgeId;
   if (state.selection && !findSelected()) state.selection = null;
@@ -165,8 +187,17 @@ export function setView(view) {
 }
 
 export function setTitle(title) {
-  state.title = String(title || "").trim() || "Central topic";
+  state.title = String(title || "").trim() || DEFAULT_TITLE;
   emit("graph");
+}
+
+/**
+ * The transcript in the box, kept for saving. Deliberately silent: this runs on
+ * every keystroke, and an "update" here would repaint the whole canvas for a
+ * change nothing on it can see.
+ */
+export function setTranscript(text) {
+  state.transcript = String(text || "");
 }
 
 export function setQuery(q) {
@@ -204,16 +235,6 @@ export function linksOf(nodeId) {
 /* Normalisation                                                       */
 /* ------------------------------------------------------------------ */
 
-export function normalizeNodeType(type) {
-  const t = String(type || "").toLowerCase();
-  return NODE_TYPES.includes(t) ? t : "theme";
-}
-
-export function normalizeEdgeType(type) {
-  const t = String(type || "").toLowerCase();
-  return EDGE_TYPES.includes(t) ? t : "relates";
-}
-
 function nextIdFrom(ids, prefix) {
   let max = 0;
   ids.forEach((id) => {
@@ -235,6 +256,10 @@ export function setGraph(data) {
   state.nodes = incoming.map((n) => {
     const id = String(n.id);
     const old = previous.get(id);
+    // A saved map carries the coordinates of the nodes its author dragged, and
+    // only those. Nothing streamed from the extractor has them, so this branch
+    // is the file-and-library path alone.
+    const placed = Number.isFinite(n.x) && Number.isFinite(n.y);
     return {
       id,
       label: String(n.label || "Untitled"),
@@ -243,7 +268,11 @@ export function setGraph(data) {
       // body of the note card, so it has to survive the trip into state.
       quote: typeof n.quote === "string" ? n.quote.trim() : old?.quote || "",
       mentions: Number(n.mentions) || old?.mentions || 1,
-      ...(old ? { x: old.x, y: old.y, pinned: old.pinned } : {})
+      ...(placed
+        ? { x: n.x, y: n.y, pinned: true }
+        : old
+          ? { x: old.x, y: old.y, pinned: old.pinned }
+          : {})
     };
   });
 

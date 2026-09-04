@@ -3,8 +3,9 @@
 import { createGraph } from "./graph.js";
 import { createNotes } from "./notes.js";
 import { connectController } from "./controller.js";
-import { subscribe } from "./state.js";
-import { el, syncPanels, updateCharCount, setStatus } from "./ui.js";
+import { state, subscribe } from "./state.js";
+import { restoreSession, applyDocument, initAutosave } from "./session.js";
+import { el, syncPanels, updateCharCount, setStatus, toast, relativeTime } from "./ui.js";
 
 let delegate = {};
 
@@ -27,6 +28,12 @@ delegate = connectController(graph, notes);
 // before that happened, so pick up the final colours.
 graph.refreshTheme();
 
+// The map from the last visit, back before anything is subscribed or drawn: the
+// first render below then paints it in place, instead of the canvas flashing
+// empty and animating it in.
+const restored = restoreSession();
+if (restored) applyDocument(restored.doc);
+
 // Both views stay rendered whichever one is on screen: the note board is an
 // overlay rather than a replacement, so switching is instant and the PNG export
 // still has a laid-out map to serialise from the note view.
@@ -47,4 +54,19 @@ updateCharCount();
 syncPanels();
 graph.render({ animate: false });
 notes.render();
-setStatus("Ready — paste a transcript or add nodes by hand");
+if (restored) graph.fit({ duration: 0 });
+
+setStatus(restoredMessage(restored) || "Ready — paste a transcript or add nodes by hand");
+
+// Started last, so restoring the session is not itself the first thing saved.
+initAutosave({ onProblem: (message) => toast(message, "error", 5200) });
+
+function restoredMessage(session) {
+  if (!session) return null;
+  const when = relativeTime(session.savedAt);
+  const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  const what = state.nodes.length
+    ? `${count(state.nodes.length, "node")}, ${count(state.edges.length, "connection")}`
+    : "the transcript you had open";
+  return `Restored ${what}${when ? ` from ${when}` : ""}`;
+}

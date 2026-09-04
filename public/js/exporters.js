@@ -1,7 +1,7 @@
 /** Download helpers: the graph as JSON, or the canvas as a PNG image. */
 
-import { state } from "./state.js";
 import { readPalette } from "./palette.js";
+import { currentDocument } from "./session.js";
 
 function download(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -12,18 +12,14 @@ function download(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/**
+ * The map as a file. It is the same document the app saves and reads back, so an
+ * export is a round trip rather than a one-way dump: the quotes that make the
+ * note view worth reading, the transcript the map came from, and the positions
+ * of the nodes the user placed by hand all leave with it.
+ */
 export function exportJson() {
-  const payload = JSON.stringify(
-    {
-      title: state.title,
-      // The quote is what the note view shows and what makes an exported graph
-      // worth re-reading, so it leaves with the rest of the node.
-      nodes: state.nodes.map(({ id, label, type, quote }) => ({ id, label, type, quote })),
-      edges: state.edges.map(({ id, from, to, type }) => ({ id, from, to, type }))
-    },
-    null,
-    2
-  );
+  const payload = JSON.stringify(currentDocument(), null, 2);
   download(new Blob([payload], { type: "application/json" }), "mindmap.json");
 }
 

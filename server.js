@@ -6,9 +6,12 @@ const path = require("path");
 const { loadConfig } = require("./lib/config");
 const { createOllamaClient, UpstreamError } = require("./lib/ollama");
 const { extractGraph } = require("./lib/extract");
+const { createStore } = require("./lib/store");
+const { createGraphsRouter } = require("./lib/graphs-api");
 
 const config = loadConfig();
 const client = createOllamaClient(config);
+const store = createStore({ dir: config.graphStoreDir });
 const app = express();
 
 app.use(express.json({ limit: "2mb" }));
@@ -16,6 +19,7 @@ app.use(express.static(path.join(__dirname, "public")));
 // samples/ lives outside public/, so it needs its own mount for the client to be
 // able to offer "load the sample transcript".
 app.use("/samples", express.static(path.join(__dirname, "samples")));
+app.use("/api/graphs", createGraphsRouter({ store }));
 
 app.get("/api/health", async (req, res) => {
   const ollama = await client.health();

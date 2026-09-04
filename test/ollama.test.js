@@ -51,6 +51,36 @@ test("generate asks Ollama for the graph schema, not just any JSON", async () =>
   ]);
 });
 
+test("generate pins the sampler instead of inheriting the model's chat defaults", async () => {
+  let sent;
+  const client = createOllamaClient(config, async (url, options) => {
+    sent = JSON.parse(options.body);
+    return jsonResponse({ response: '{"nodes":[],"edges":[]}' });
+  });
+
+  await client.generate("hi");
+
+  // Without this block the call runs at gemma3's temperature 1 / top_p 0.95,
+  // which answers the same chunk differently every time it is asked.
+  assert.equal(sent.options.temperature, 0);
+  assert.equal(sent.options.top_p, 0.9);
+  assert.equal(sent.options.num_ctx, 8192);
+});
+
+test("the sampler settings are overridable from the environment", async () => {
+  let sent;
+  const client = createOllamaClient(
+    loadConfig({ OLLAMA_TEMPERATURE: "0.3", OLLAMA_TOP_P: "0.95", OLLAMA_NUM_CTX: "4096" }),
+    async (url, options) => {
+      sent = JSON.parse(options.body);
+      return jsonResponse({ response: '{"nodes":[],"edges":[]}' });
+    }
+  );
+
+  await client.generate("hi");
+  assert.deepEqual(sent.options, { temperature: 0.3, top_p: 0.95, num_ctx: 4096 });
+});
+
 test("OLLAMA_FORMAT_SCHEMA=0 falls back to plain JSON mode for an old server", async () => {
   let sent;
   const client = createOllamaClient(

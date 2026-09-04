@@ -33,14 +33,18 @@ The status line tells you straight away whether Ollama is reachable and whether 
 | `TRANSCRIPT_CHUNK_OVERLAP_LINES` | `1` | Lines repeated from the previous chunk |
 | `CHUNK_PARSE_RETRIES` | `1` | Stricter re-asks when the model answers with prose or nothing |
 | `OLLAMA_FORMAT_SCHEMA` | `1` | Send a JSON schema as `format`; set to `0` for an Ollama older than 0.5 |
+| `OLLAMA_TEMPERATURE` | `0` | Sampling temperature. `0` is greedy: the same chunk gives the same map |
+| `OLLAMA_TOP_P` | `0.9` | Nucleus sampling; only has an effect if the temperature is raised |
+| `OLLAMA_NUM_CTX` | `8192` | Context window per call. Ollama's own default is `4096`, tight for a full chunk plus a long answer |
 | `LINK_PASS` | `1` | One extra call at the end that connects concepts found in different chunks |
 | `KNOWN_LABELS_IN_PROMPT` | `40` | Concepts fed back into later chunk prompts |
+| `GRAPH_STORE_DIR` | `data/graphs` | Where saved maps are written, one JSON file per map. Gitignored |
 | `NODE_ENV` | `development` | `production` hides error details from responses |
 
 ## How extraction works
 
 1. **Chunking** cuts the transcript at line boundaries only, so speaker turns (`IM: And agree the CDE naming convention…`) stay intact. A line longer than the limit is the one case that gets split on words. Each chunk repeats the last line of the previous one so a thought straddling a cut is still visible whole. Chunks are then evened out: filling each one to the brim split the 3658-character sample into 3354 + 304, and a 304-character tail is short enough that the model answers it with an empty graph.
-2. **Each chunk** is asked for with a JSON schema, not with `format: "json"`. Plain JSON mode only promises *some* valid JSON, and the shortest valid JSON is `{}` — which is what gemma3:4b answered for whole chunks, however the prompt was worded. The schema requires both arrays, so that exit is closed.
+2. **Each chunk** is asked for with a JSON schema, not with `format: "json"`. Plain JSON mode only promises *some* valid JSON, and the shortest valid JSON is `{}` — which is what gemma3:4b answered for whole chunks, however the prompt was worded. The schema requires both arrays, so that exit is closed. The same call also pins the sampler at temperature 0: the schema decides what shape the answer takes, the temperature decides how it is chosen, and left unset it is gemma3's chat default of 1 — variety, on a job that wants the same chunk to give the same map.
 3. **The prompt carries the concepts found so far**, so the model reuses the exact label `Handover Issues` instead of inventing `Issues with handover`.
 4. **Merging** collapses nodes whose labels match once case, punctuation and a leading article are ignored, then rewrites every edge onto the surviving node ids. Without that rewrite the same concept is drawn once per chunk that mentions it.
 5. **A linking pass** closes the run. Each chunk is extracted alone, so its concepts only ever get edges to concepts from the same chunk and the map still reads as one island per chunk. This pass shows the model the concept list alone — no transcript, so it is short — and asks only for the edges that cross between groups. Edges pointing at ids it made up are dropped.
@@ -56,6 +60,21 @@ Each node carries a `quote`: a verbatim span from the transcript that justifies 
 - `POST /api/extract/stream` `{ transcript }` → server-sent events: `status` (carries `chunks`, `chunkSize` and the `model` name), `progress` (`chunk`, `total`, `chars`), `retry` (a chunk being re-asked, with the `code` that caused it), `graph` (the full merged graph so far, once per chunk, with the `ms` that chunk took), `warning`, `done` (`chunks`, `warnings`, `partial`, `ms`), `error`
 - `GET /samples/<file>` → the bundled sample transcripts in `samples/`
 
+Saved maps, one JSON file each under `GRAPH_STORE_DIR`:
+
+- `GET /api/graphs` → `{ graphs: [{ id, title, nodeCount, edgeCount, hasTranscript, createdAt, updatedAt }] }`, newest first
+- `POST /api/graphs` `{ title, transcript, nodes, edges }` → `201` with the summary of the saved map, including its new `id`
+- `GET /api/graphs/:id` → the whole document, transcript included
+- `PUT /api/graphs/:id` → save over that map, keeping its id and its `createdAt`
+- `PATCH /api/graphs/:id` `{ title }` → rename it
+- `DELETE /api/graphs/:id` → `{ ok, id }`
+
+Every body is checked against the document rules before it is written, so what the
+store holds can always be opened again: `400 invalid_document` carries a `details`
+array naming the field that is wrong, `400 empty_document` refuses a map with no
+nodes, and an id that is not one the store issued is a `400 bad_request` before any
+file is touched.
+
 ## Layout
 
 ```
@@ -69,12 +88,18 @@ lib/json-extract.js  Getting JSON out of whatever the model wrapped it in
 lib/graph.js       Node/edge normalisation, sanitising, cross-chunk merging, components
 lib/link.js        The pass that connects concepts from different chunks
 lib/extract.js     The per-chunk pipeline both routes share
+lib/document.js    The server's way into the document rules (imports the browser's module)
+lib/store.js       Saved maps on disk: one JSON file each, atomic writes
+lib/graphs-api.js  The /api/graphs routes: list, save, open, rename, delete
 
 public/index.html  Markup, icon sprite, canvas overlays
 public/styles.css  Design tokens (light and dark) and every component
 public/notes.css   The note board and its cards
 public/js/main.js        Composition root: both views + controller + state subscription
 public/js/state.js       Graph data, selection, filters, current view, undo/redo history
+public/js/graph-doc.js   The saved format and its rules — shared with the server  (pure)
+public/js/session.js     The map as a document, and the localStorage autosave
+public/js/library.js     The saved-maps panel: save, open, rename, delete
 public/js/tree.js        Roots the graph: centre, branches, cross-links   (pure)
 public/js/layout.js      Radial positions, one ring per level             (pure)
 public/js/geometry.js    Label wrapping and the tapered branch ribbons
@@ -91,7 +116,10 @@ public/js/exporters.js   JSON and PNG downloads
 `public/js/package.json` holds nothing but `{"type": "module"}`. The browser does not
 need it — those files are loaded as modules either way — but Node does, so
 `test/tree.test.js` and `test/layout.test.js` can import the real layout code instead
-of a copy of it.
+of a copy of it. `lib/document.js` uses the same door for `public/js/graph-doc.js`:
+the rules a saved map has to obey are written once, in the module the browser loads,
+and the server reaches them with a dynamic `import` rather than keeping a second copy
+that would drift.
 
 ## Tests
 
@@ -99,7 +127,7 @@ of a copy of it.
 node --test test/*.test.js
 ```
 
-No test dependencies — the built-in `node:test` runner. `test/server.test.js` runs the real Express app against a stub Ollama, so the routes and the SSE stream are covered too.
+No test dependencies — the built-in `node:test` runner. `test/server.test.js` runs the real Express app against a stub Ollama, so the routes and the SSE stream are covered too; `test/graphs-api.test.js` runs it against a temporary store directory for the saved-map routes. `test/graph-doc.test.js` imports the browser's own document module and checks it agrees with `lib/graph.js`, which is what keeps "the file the app exports" and "the file the server accepts" the same file.
 
 ## The two views
 
@@ -155,6 +183,41 @@ text here, not only labels, so a card can be found by what was actually said.
 This is the view that answers "did the model make this up?", which a canvas of labels
 cannot.
 
+## Keeping a map
+
+A map is worth editing only if the editing survives the tab being closed. There are
+three doors, and all three write the same document — the same JSON, with the same
+rules, whichever one it came through.
+
+**The browser keeps the last one for you.** Every change to the graph is written to
+`localStorage` about a second later, transcript included, and the map is back on the
+canvas at the next visit with the status line saying when it was saved. Nothing is
+asked and nothing is clicked. It is one map — the one you were last looking at — and
+it lives in that browser on that machine: clearing site data clears it.
+
+**The library keeps as many as you like.** *Saved maps* in the left panel lists what
+is on the server (`GRAPH_STORE_DIR`, one JSON file per map, `data/graphs` by
+default). **Save to library** (`Ctrl`+`S`) puts the map on screen there; open one by
+clicking its row, rename it with the pencil, delete it with the bin — deleting asks
+once, in the row itself. A map opened from the library stays marked as open, and
+**Save** then writes over that entry rather than leaving a fourth copy of it in the
+list; **Save as new** is there for when a copy is what you want.
+
+**A file goes anywhere.** Export ▸ **Export JSON** downloads the map; Export ▸
+**Import JSON…** reads one back. An imported file is checked against the same rules
+the server applies before it stores anything, and the two levels of that check are
+deliberate: a file that is not a mind map is refused with the field that is wrong
+named in the status line, while rows that are individually broken — a node with no
+label, an edge pointing at a node that is not in the file — are dropped, counted in
+the activity log, and the rest of the map is drawn. Importing is undoable
+(`Ctrl`+`Z`), because it replaces everything on the canvas.
+
+What travels in the document: the title of the centre, every node with its type and
+its verbatim quote, every connection with its relation, the transcript the map was
+extracted from — and the positions of the nodes *you* dragged. Positions the layout
+worked out itself are not saved; they are recomputed identically on load, and in a
+file meant to be read they are noise.
+
 ## Usage
 
 Paste a transcript in the left panel and press **Generate mind map** (or `Ctrl`+`Enter`
@@ -184,10 +247,11 @@ On the canvas:
 On the note board the same clicks apply: a card selects, a link jumps to its note, and
 connect mode picks its two nodes from cards exactly as it does from the canvas.
 
-Toolbar, top right: add node, connect mode, undo, redo, export (JSON or a 2× PNG of the
-map), light/dark theme. Viewport controls sit bottom right, including fit‑to‑screen.
+Toolbar, top right: add node, connect mode, undo, redo, the file menu (export as JSON
+or a 2× PNG, import a JSON map), light/dark theme. Viewport controls sit bottom right,
+including fit‑to‑screen.
 
 Keyboard: `N` add node, `E` connect mode, `V` switch view, `Enter` rename the selection,
 `Del` delete it, `F` fit to screen, `R` re-run the layout, `L` activity log
-(`Shift`+`L` expanded), `/` search,
+(`Shift`+`L` expanded), `/` search, `Ctrl`+`S` save to the library,
 `Ctrl`+`Z` / `Ctrl`+`Shift`+`Z` undo and redo, `Esc` to cancel whatever is going on.

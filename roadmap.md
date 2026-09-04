@@ -5,11 +5,9 @@ rende modificabile in un layout force D3. La descrizione che finisce nella
 dashboard e' il primo paragrafo del README.
 
 <!--
-  Bozza: le milestone 1 e 2 sono cronaca di quello che c'e' nel codice, le
-  milestone da 3 in poi sono una proposta da correggere. Questo file non e'
-  ancora committato, quindi riscrivere i task e rinumerarli e' gratis: dopo il
-  primo commit il testo di ogni riga diventa la sua identita' nella storia git
-  e riscriverlo azzera il cycle time.
+  Il file e' committato: il testo di ogni riga e' ormai la sua identita' nella
+  storia git, e riscriverlo azzera il cycle time. Le milestone da 4 in poi
+  restano una proposta — quelle righe costano poco finche' nessuno le spunta.
 
   Verifica con:
     node C:/Personal_utilities/roadmap-format/roadmap-lint.mjs
@@ -42,16 +40,21 @@ dashboard e' il primo paragrafo del README.
 - [x] 2.2 Configurazione screenshot-kit che aspetta il grafo e il settling del force layout <!-- size: M; done: 2026-08-22 -->
 - [x] 2.3 Note su quale modello Ollama regge la cattura e con che parametri <!-- size: S; done: 2026-08-22 -->
 
-## 3. Persistenza dei grafi
+## 3. Persistenza dei grafi <!-- due: 2026-09-04 -->
 
 Oggi l'unica uscita e' Export JSON e non esiste la strada di ritorno: un grafo
 sistemato a mano si perde al reload.
 
-- [ ] 3.1 Import di un grafo JSON esportato, con validazione dello stesso schema del server <!-- size: S -->
-- [ ] 3.2 Salvataggio automatico in localStorage e ripristino all'apertura <!-- size: S -->
-- [ ] 3.3 Salvataggio dei grafi lato server, con id e elenco dei grafi salvati <!-- size: M -->
-- [ ] 3.4 Rinomina ed eliminazione di un grafo salvato <!-- size: S -->
-- [ ] 3.5 Conservare il transcript di partenza insieme al grafo <!-- size: S -->
+Le tre porte scrivono lo stesso documento, e le regole di quel documento stanno
+in un file solo (`public/js/graph-doc.js`): il server lo importa invece di
+tenerne una copia, cosi' il file che l'app esporta e' per costruzione il file
+che il server accetta.
+
+- [x] 3.1 Import di un grafo JSON esportato, con validazione dello stesso schema del server <!-- size: S; done: 2026-09-04 -->
+- [x] 3.2 Salvataggio automatico in localStorage e ripristino all'apertura <!-- size: S; done: 2026-09-04 -->
+- [x] 3.3 Salvataggio dei grafi lato server, con id e elenco dei grafi salvati <!-- size: M; done: 2026-09-04 -->
+- [x] 3.4 Rinomina ed eliminazione di un grafo salvato <!-- size: S; done: 2026-09-04 -->
+- [x] 3.5 Conservare il transcript di partenza insieme al grafo <!-- size: S; done: 2026-09-04 -->
 
 ## 4. Qualita' dell'estrazione
 
@@ -96,5 +99,5 @@ transcript, la cosa piu' utile del pipeline, finiva solo nel JSON.
 - [x] 7.6 Vista note: una scheda per concetto con id, citazione verbatim, link uscenti e backlink <!-- size: L; done: 2026-09-04 -->
 - [x] 7.7 Selettore Mappa / Note in toolbar e da tastiera, con selezione condivisa fra le due viste <!-- size: M; done: 2026-09-04 -->
 - [x] 7.8 Test su tree.js e layout.js, importati da Node senza build <!-- size: M; done: 2026-09-04 -->
-- [ ] 7.9 Titolo del centro salvato insieme al grafo, oggi si perde al reload <!-- size: S -->
+- [x] 7.9 Titolo del centro salvato insieme al grafo, oggi si perde al reload <!-- size: S; done: 2026-09-04 -->
 - [ ] 7.10 Ricerca che evidenzia anche le citazioni nella vista mappa, non solo nelle note <!-- size: S -->

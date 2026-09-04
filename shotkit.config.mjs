@@ -194,9 +194,9 @@ export default {
     {
       name: "06-export",
       alt:
-        "An open menu at the top right of the canvas offering two exports, JSON and PNG image, over the finished map.",
+        "An open menu at the top right of the canvas offering Export JSON and Export PNG image and, under a divider, Import JSON, over the finished map.",
       shows:
-        "Export: the finished map leaves as JSON — quotes included — for another tool, or as a PNG image; nothing in the round trip leaves the machine",
+        "The file menu: the finished map leaves as JSON — quotes, transcript and hand-placed positions included — or as a 2× PNG, and the same JSON comes back in through Import; nothing in the round trip leaves the machine",
       path: "/",
       waitFor: "#exportMenu",
       async prepare(page) {

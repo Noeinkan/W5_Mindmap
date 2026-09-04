@@ -1,2 +1,5 @@
 # Screenshot runs (screenshot-kit)
 .shots/
+
+# Saved maps: the user's own meetings, one JSON file each (GRAPH_STORE_DIR)
+data/

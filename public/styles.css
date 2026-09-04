@@ -790,6 +790,115 @@ select {
 }
 
 /* ============================================================
+   Saved maps
+   ============================================================ */
+.lib-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.lib-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  /* Six or seven rows, then it scrolls: the panel is one item in a sidebar that
+     also has to show the transcript and the inspector. */
+  max-height: 232px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.lib-empty {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.lib-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+
+.lib-row:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+/* The map on screen came from this entry — which is what Save will write to. */
+.lib-row.is-open {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.lib-open {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.lib-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-row.is-confirming .lib-title {
+  white-space: normal;
+  padding: 6px 8px;
+  color: var(--danger);
+}
+
+.lib-meta {
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+.lib-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* The row's own buttons stay out of the way until it is hovered — a list of maps
+   should read as titles, not as a wall of icons. */
+.lib-row .lib-actions .icon-btn {
+  opacity: 0;
+}
+
+.lib-row:hover .lib-actions .icon-btn,
+.lib-row .lib-actions .icon-btn:focus-visible {
+  opacity: 1;
+}
+
+.lib-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 12.5px;
+}
+
+.link-btn.is-danger {
+  color: var(--danger);
+}
+
+/* ============================================================
    Canvas
    ============================================================ */
 .canvas {
@@ -1007,6 +1116,13 @@ select {
   width: 16px;
   height: 16px;
   color: var(--text-dim);
+}
+
+/* Import is the one entry that reads a file instead of writing one. */
+.menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
 }
 
 /* Theme toggle icon swap */

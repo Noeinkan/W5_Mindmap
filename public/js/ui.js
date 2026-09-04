@@ -233,6 +233,25 @@ export function updateCharCount() {
   el.charCount.textContent = `${length.toLocaleString()} character${length === 1 ? "" : "s"}`;
 }
 
+/**
+ * "just now", "6 min ago", "3 days ago" — how a saved map says when it was last
+ * touched. A timestamp would be exact and useless: what the list is scanned for
+ * is which map is the recent one.
+ */
+export function relativeTime(iso) {
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return "";
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (seconds < 45) return "just now";
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min ago`;
+  if (seconds < 86400) {
+    const hours = Math.round(seconds / 3600);
+    return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  }
+  const days = Math.round(seconds / 86400);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 /* ------------------------------------------------------------------ */
 /* Inline label editor                                                 */
 /* ------------------------------------------------------------------ */

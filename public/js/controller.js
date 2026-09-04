@@ -19,6 +19,7 @@ import {
   emit,
   setView,
   setTitle,
+  setTranscript,
   unpinAll,
   matchesQuery,
   normalizeNodeType,
@@ -27,6 +28,9 @@ import {
 import { SYNTHETIC_ROOT } from "./tree.js";
 import { generateMindMap, loadSampleTranscript } from "./api.js";
 import { exportJson, exportPng } from "./exporters.js";
+import { readDocument } from "./graph-doc.js";
+import { applyDocument, scheduleAutosave } from "./session.js";
+import { initLibrary, setOpenGraph, saveToLibrary } from "./library.js";
 import {
   el,
   setStatus,
@@ -131,6 +135,20 @@ export function connectController(graph, notes) {
     toast(selection.kind === "node" ? "Node deleted" : "Connection deleted", "ok");
   }
 
+  /**
+   * One step back or forward, with the transcript box put back in step with it.
+   * A history entry can carry a different transcript — opening a file replaces
+   * both — and the textarea is the one thing on screen no re-render touches.
+   */
+  function stepHistory(back) {
+    if (!(back ? undo() : redo())) return false;
+    if (el.transcript.value !== state.transcript) {
+      el.transcript.value = state.transcript;
+      updateCharCount();
+    }
+    return true;
+  }
+
   async function generate() {
     const transcript = el.transcript.value.trim();
     if (!transcript) {
@@ -142,6 +160,10 @@ export function connectController(graph, notes) {
     setBusy(true);
     setStatus("Sending the transcript to the model…", "busy");
     logRunStart(transcript.length);
+    setTranscript(transcript);
+    // A map generated from scratch is a new map: Save must not land on top of
+    // whichever library entry happened to be open before it.
+    setOpenGraph(null);
     // The centre of the map is the meeting itself, so it gets the meeting's own
     // first line where there is one. Double-click it to say something better.
     const derived = titleFromTranscript(transcript);
@@ -213,9 +235,52 @@ export function connectController(graph, notes) {
     return cut.slice(0, cut.lastIndexOf(" ")).replace(/[,;:–—-]+$/, "");
   }
 
+  /**
+   * Puts a document on the canvas: an imported file, or a map from the library.
+   * Undoable, because it replaces everything that was there.
+   */
+  function openDocument(doc) {
+    applyDocument(doc, { undoable: true });
+    graph.fitWhenSettled();
+    setStatus(
+      `${doc.title} — ${doc.nodes.length} nodes, ${doc.edges.length} connections`,
+      "ok"
+    );
+  }
+
+  async function importFile(file) {
+    if (!file) return;
+    const { ok, errors, warnings, doc } = readDocument(await file.text());
+
+    if (!ok) {
+      setStatus(`Import failed — ${errors[0] || "that file is not a mind map"}`, "error");
+      logLine(`Import failed — ${file.name}`, "error", errors.join(" "));
+      toast("That file is not a mind map", "error", 4200);
+      return;
+    }
+    if (!doc.nodes.length) {
+      setStatus("That file has no nodes to draw", "error");
+      toast("That file has no nodes to draw", "error", 4200);
+      return;
+    }
+
+    openDocument(doc);
+    // An imported file is a file, not a library entry — until it is saved.
+    setOpenGraph(null);
+    logLine(`Imported ${file.name} — ${doc.nodes.length} nodes, ${doc.edges.length} connections`, "ok");
+    warnings.forEach((warning) => logLine(warning, "warn"));
+    toast(
+      warnings.length ? `Imported with ${warnings.length} problem${warnings.length > 1 ? "s" : ""} — see the log` : "Map imported",
+      warnings.length ? "info" : "ok",
+      warnings.length ? 4600 : 2600
+    );
+  }
+
   async function useSample() {
     try {
       el.transcript.value = await loadSampleTranscript();
+      setTranscript(el.transcript.value);
+      scheduleAutosave();
       updateCharCount();
       setStatus("Sample transcript loaded — hit Generate", "idle");
       logLine(`Sample transcript loaded — ${el.transcript.value.length.toLocaleString()} characters`, "info");
@@ -260,7 +325,13 @@ export function connectController(graph, notes) {
   el.loadSample.addEventListener("click", useSample);
   el.emptySample.addEventListener("click", useSample);
   el.emptyAdd.addEventListener("click", () => createNodeAt());
-  el.transcript.addEventListener("input", updateCharCount);
+  el.transcript.addEventListener("input", (event) => {
+    updateCharCount();
+    // The transcript is part of the saved map, so it is part of what autosave
+    // has to keep — but it never emits, so it schedules the save itself.
+    setTranscript(event.target.value);
+    scheduleAutosave();
+  });
   el.transcript.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) generate();
   });
@@ -271,10 +342,10 @@ export function connectController(graph, notes) {
     if (state.connectMode) toast("Connect mode on — click two nodes");
   });
   el.undo.addEventListener("click", () => {
-    if (undo()) toast("Undone");
+    if (stepHistory(true)) toast("Undone");
   });
   el.redo.addEventListener("click", () => {
-    if (redo()) toast("Redone");
+    if (stepHistory(false)) toast("Redone");
   });
   el.deleteSelected.addEventListener("click", deleteSelection);
   el.inspectorClose.addEventListener("click", clearSelection);
@@ -342,9 +413,14 @@ export function connectController(graph, notes) {
     el.exportBtn.setAttribute("aria-expanded", String(open));
   });
   el.exportMenu.addEventListener("click", async (event) => {
-    const button = event.target.closest("button[data-export]");
+    const button = event.target.closest("button[data-export], button[data-action]");
     if (!button) return;
     closeExportMenu();
+
+    if (button.dataset.action === "import") {
+      el.importFile.click();
+      return;
+    }
     if (!state.nodes.length) {
       toast("Nothing to export yet", "error");
       return;
@@ -362,6 +438,22 @@ export function connectController(graph, notes) {
     }
   });
   document.addEventListener("click", closeExportMenu);
+
+  el.importFile.addEventListener("change", async (event) => {
+    const [file] = event.target.files || [];
+    // Cleared before the file is read: picking the same file twice in a row
+    // fires no second change event otherwise, which reads as a dead button.
+    event.target.value = "";
+    try {
+      await importFile(file);
+    } catch (err) {
+      setStatus(err.message || "That file could not be read", "error");
+      toast("That file could not be read", "error", 4200);
+    }
+  });
+
+  /* Saved maps */
+  initLibrary({ onOpen: openDocument });
 
   /* Double-click on empty canvas creates a node there */
   el.graph.addEventListener("dblclick", (event) => {
@@ -388,7 +480,15 @@ export function connectController(graph, notes) {
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
-      if (event.shiftKey ? redo() : undo()) toast(event.shiftKey ? "Redone" : "Undone");
+      if (stepHistory(!event.shiftKey)) toast(event.shiftKey ? "Redone" : "Undone");
+      return;
+    }
+
+    // Ctrl+S means save in every editor, and here too — including from inside
+    // the transcript box, which is why it sits above the "user is typing" guard.
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      saveToLibrary();
       return;
     }
 
