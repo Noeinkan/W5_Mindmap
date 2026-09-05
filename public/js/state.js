@@ -28,6 +28,13 @@ export const state = {
   connectMode: false,
   pendingSourceId: null,
   hiddenTypes: new Set(),
+  /**
+   * Branches folded away, by the id of the node they hang from. A way of
+   * looking at the map rather than a fact about it, so it sits here beside the
+   * legend filter and the search box instead of travelling in the document —
+   * the same line the app already draws between the map and the view of it.
+   */
+  collapsed: new Set(),
   query: "",
   /** Which renderer owns the canvas: the radial map, or the note cards. */
   view: "map",
@@ -214,6 +221,37 @@ export function toggleTypeVisibility(type) {
 export const isVisible = (node) => !state.hiddenTypes.has(node.type);
 
 /**
+ * Folds a branch away, or opens it again.
+ *
+ * "graph", not "filter": a folded branch leaves the tree entirely, so the map
+ * has to be laid out again. A branch that kept its place while invisible would
+ * save no room, and room is the whole reason to fold one.
+ */
+export function toggleCollapse(id) {
+  if (state.collapsed.has(id)) state.collapsed.delete(id);
+  else state.collapsed.add(id);
+  emit("graph");
+}
+
+/** Opens the named folds. Returns how many of them were actually shut. */
+export function openFolds(ids) {
+  const shut = ids.filter((id) => state.collapsed.has(id));
+  if (!shut.length) return 0;
+  shut.forEach((id) => state.collapsed.delete(id));
+  emit("graph");
+  return shut.length;
+}
+
+/** Opens every folded branch. Returns how many there were. */
+export function expandAll() {
+  const folded = state.collapsed.size;
+  if (!folded) return 0;
+  state.collapsed.clear();
+  emit("graph");
+  return folded;
+}
+
+/**
  * Search hits. The note view puts the transcript quote on screen, so a search
  * that only looked at labels would dim a card whose visible text holds the word.
  */
@@ -288,6 +326,9 @@ export function setGraph(data) {
 
   state.nextNodeId = nextIdFrom(state.nodes.map((n) => n.id), "n");
   state.nextEdgeId = nextIdFrom(state.edges.map((e) => e.id), "e");
+  // Ids are `n1`, `n2`, … in every map, so folds kept from the last one would
+  // land on whichever nodes happened to take those ids in this one.
+  state.collapsed.clear();
   if (!findSelected()) state.selection = null;
 }
 
@@ -353,6 +394,7 @@ export function addEdge(fromId, toId, type) {
 export function removeNode(id) {
   state.nodes = state.nodes.filter((n) => n.id !== id);
   state.edges = state.edges.filter((e) => e.from !== id && e.to !== id);
+  state.collapsed.delete(id);
   if (state.selection?.id === id) state.selection = null;
 }
 

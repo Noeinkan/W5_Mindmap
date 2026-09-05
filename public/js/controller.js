@@ -10,6 +10,9 @@ import {
   setConnectMode,
   setQuery,
   toggleTypeVisibility,
+  toggleCollapse,
+  expandAll,
+  openFolds,
   addNode,
   addEdge,
   removeNode,
@@ -26,7 +29,8 @@ import {
   normalizeEdgeType
 } from "./state.js";
 import { SYNTHETIC_ROOT } from "./tree.js";
-import { generateMindMap, loadSampleTranscript } from "./api.js";
+import { generateMindMap, loadSampleTranscript, ingestDocument } from "./api.js";
+import { initSections, showDocument, clearDocument, choose, WHOLE_DOCUMENT } from "./sections.js";
 import { exportJson, exportPng } from "./exporters.js";
 import { readDocument } from "./graph-doc.js";
 import { applyDocument, scheduleAutosave } from "./session.js";
@@ -56,6 +60,10 @@ import {
 } from "./log.js";
 
 export function connectController(graph, notes) {
+  // Whether the map's title came from a file — a book's own title, or the
+  // chapter's. It survives until the transcript is typed over or replaced.
+  let titleFromFile = false;
+
   /* ---------------------------- Graph gestures --------------------- */
 
   function onNodeClick(node) {
@@ -70,6 +78,32 @@ export function connectController(graph, notes) {
       return;
     }
     select("node", node.id);
+  }
+
+  /**
+   * Folds the branch under a node away, or opens it again.
+   *
+   * The count comes back from the graph rather than being worked out here: the
+   * controller holds nodes and edges, and how many of them hang under one node
+   * is a fact about the tree, which is the map view's own reading of them.
+   */
+  function foldBranch(node) {
+    if (!node || node.id === SYNTHETIC_ROOT) return;
+    toggleCollapse(node.id);
+
+    const hidden = graph.hiddenUnder(node.id);
+    if (hidden) {
+      toast(`Branch folded — ${hidden} node${hidden > 1 ? "s" : ""} hidden`);
+      return;
+    }
+    // Nothing hung off it. Left as it is, the map would look untouched and the
+    // fold would have no badge to undo it with, so it is taken straight back.
+    if (state.collapsed.has(node.id)) {
+      toggleCollapse(node.id);
+      toast("Nothing to fold under this node");
+      return;
+    }
+    toast("Branch opened");
   }
 
   function handleConnectClick(node) {
@@ -166,7 +200,9 @@ export function connectController(graph, notes) {
     setOpenGraph(null);
     // The centre of the map is the meeting itself, so it gets the meeting's own
     // first line where there is one. Double-click it to say something better.
-    const derived = titleFromTranscript(transcript);
+    // A title that came from a file — the book's own, or the chapter's — is
+    // already better than a guess at the first line, so it stands.
+    const derived = titleFromFile ? null : titleFromTranscript(transcript);
     if (derived) state.title = derived;
     let received = false;
 
@@ -241,6 +277,10 @@ export function connectController(graph, notes) {
    */
   function openDocument(doc) {
     applyDocument(doc, { undoable: true });
+    // Whatever file was read, this map replaced its transcript: the section list
+    // would now cut up a text that is no longer in the box.
+    clearDocument();
+    titleFromFile = false;
     graph.fitWhenSettled();
     setStatus(
       `${doc.title} — ${doc.nodes.length} nodes, ${doc.edges.length} connections`,
@@ -279,9 +319,9 @@ export function connectController(graph, notes) {
   async function useSample() {
     try {
       el.transcript.value = await loadSampleTranscript();
-      setTranscript(el.transcript.value);
-      scheduleAutosave();
-      updateCharCount();
+      putInTranscript(el.transcript.value);
+      clearDocument();
+      titleFromFile = false;
       setStatus("Sample transcript loaded — hit Generate", "idle");
       logLine(`Sample transcript loaded — ${el.transcript.value.length.toLocaleString()} characters`, "info");
       el.transcript.focus();
@@ -289,6 +329,117 @@ export function connectController(graph, notes) {
       setStatus("Sample transcript could not be loaded", "error");
     }
   }
+
+  /* ------------------------- Reading a file ------------------------ */
+
+  /**
+   * A document short enough to map in one go. Above it, opening a file loads one
+   * section rather than all of it: a book is three hundred chunks and an hour of
+   * model time, and the Sections panel is where the rest of it waits.
+   */
+  const WHOLE_DOCUMENT_LIMIT = 20000;
+  /**
+   * The most that is put in the box without being asked for — about a quarter of
+   * an hour of model time. A section can be far bigger than this: books exist
+   * whose contents list names one chapter and then holds the entire novel, and
+   * loading that on the way past would be a surprise, not a convenience.
+   */
+  const AUTO_LOAD_LIMIT = 60000;
+  /** Below this a section is a title page or a heading, not something to map. */
+  const SUBSTANTIAL = 1200;
+
+  /** Reads a PDF, EPUB or text file into the transcript box. */
+  async function readFile(file) {
+    if (!file) return;
+
+    setBusy(true);
+    setStatus(`Reading ${file.name}…`, "busy");
+    logLine(`Reading ${file.name} — ${formatSize(file.size)}`, "info");
+
+    try {
+      const doc = await ingestDocument(file);
+      showDocument({ ...doc, name: file.name });
+
+      logLine(
+        `${file.name} — ${doc.chars.toLocaleString()} characters over ${count(doc.units, doc.unitLabel)}, ${count(doc.sections.length, "section")}`,
+        "ok"
+      );
+      doc.warnings.forEach((warning) => logLine(warning, "warn"));
+
+      // Small enough to map whole, or long enough that one section is the
+      // sensible first bite. Either way the panel is open and says what else
+      // there is.
+      const whole = doc.chars <= WHOLE_DOCUMENT_LIMIT || doc.sections.length < 2;
+      const kind = doc.kind === "epub" ? "book" : "document";
+
+      if (whole) {
+        choose(WHOLE_DOCUMENT);
+        setStatus(`${file.name} — ${doc.chars.toLocaleString()} characters. Hit Generate.`, "ok");
+      } else {
+        el.sectionsPanel.open = true;
+        const index = firstLoadableSection(doc);
+        if (index === -1) {
+          // Every section is either a heading or the size of a book. Nothing goes
+          // in the box uninvited; the list says what the choices cost. The box is
+          // emptied all the same — leaving the last file's text under a new
+          // file's section list is how the wrong thing gets mapped.
+          putInTranscript("");
+          setStatus(
+            `${file.name} — ${doc.chars.toLocaleString()} characters in ${doc.sections.length} sections. Pick one below.`,
+            "ok"
+          );
+        } else {
+          const picked = choose(index);
+          setStatus(
+            `${picked.title} loaded — ${doc.sections.length} sections in this ${kind}, pick another below.`,
+            "ok"
+          );
+        }
+      }
+      toast(doc.warnings.length ? "File read — see the log" : "File read", doc.warnings.length ? "info" : "ok");
+    } catch (err) {
+      const message = (err && err.message) || "That file could not be read";
+      setStatus(message, "error");
+      logLine(`${file.name} — ${message}`, "error");
+      toast("That file could not be read", "error", 4600);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * The first section worth putting in the box on the way past: past the cover,
+   * the title page and the copyright notice, and not the one that turns out to
+   * hold the whole novel. `-1` when there is no such thing.
+   */
+  function firstLoadableSection(doc) {
+    // A section worth opening on holds a real share of the document as well as a
+    // real number of characters. The share is what rules out the copyright page
+    // of a book whose contents list has put every chapter in one section.
+    const floor = Math.max(SUBSTANTIAL, doc.chars * 0.01);
+    return doc.sections.findIndex((section) => section.chars >= floor && section.chars <= AUTO_LOAD_LIMIT);
+  }
+
+  /** Puts text in the box and tells everything that cares. */
+  function putInTranscript(text) {
+    el.transcript.value = text;
+    setTranscript(text);
+    updateCharCount();
+    scheduleAutosave();
+  }
+
+  function formatSize(bytes) {
+    if (!bytes) return "unknown size";
+    return bytes < 1024 * 1024
+      ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+      : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  const count = (n, noun) => `${n.toLocaleString()} ${noun}${n === 1 ? "" : "s"}`;
+
+  /** A drag carrying a file, as opposed to selected text from another window. */
+  const hasFiles = (event) =>
+    Boolean(event.dataTransfer) && Array.from(event.dataTransfer.types || []).includes("Files");
 
   /* ---------------------------- Wiring ----------------------------- */
 
@@ -320,20 +471,69 @@ export function connectController(graph, notes) {
   });
   initSidebar(() => graph.resize());
   initLog({ notify: toast });
+  // Picking a section replaces what is in the box, and names the map after it:
+  // a map of chapter seven should not be called after the whole book.
+  initSections({
+    onPick: ({ title, text, whole, chosen }) => {
+      putInTranscript(text);
+      if (title) {
+        state.title = title;
+        titleFromFile = true;
+      }
+      // Only a click on the list says so out loud: the section chosen while a
+      // file is being read has its own line, and two would fight over it.
+      if (chosen) {
+        setStatus(`${title} — ${text.length.toLocaleString()} characters. Hit Generate.`, "ok");
+        if (!whole) logLine(`Section loaded — ${title} (${text.length.toLocaleString()} characters)`, "info");
+      }
+    }
+  });
 
   el.generate.addEventListener("click", generate);
   el.loadSample.addEventListener("click", useSample);
   el.emptySample.addEventListener("click", useSample);
   el.emptyAdd.addEventListener("click", () => createNodeAt());
+  el.openFile.addEventListener("click", () => el.documentFile.click());
+  el.documentFile.addEventListener("change", (event) => {
+    const [file] = event.target.files || [];
+    // Cleared first: picking the same file twice in a row fires no second change
+    // event otherwise, which reads as a dead button.
+    event.target.value = "";
+    readFile(file);
+  });
   el.transcript.addEventListener("input", (event) => {
     updateCharCount();
     // The transcript is part of the saved map, so it is part of what autosave
     // has to keep — but it never emits, so it schedules the save itself.
     setTranscript(event.target.value);
     scheduleAutosave();
+    // Typed over: the title the file gave has stopped describing what is here.
+    titleFromFile = false;
   });
   el.transcript.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) generate();
+  });
+
+  // Dropping a file on the transcript box reads it. The window-level handlers
+  // are what stop the browser from doing its own thing with a file dropped
+  // anywhere else — which is to leave the page and open the PDF, taking the map
+  // on the canvas with it.
+  const dropZone = el.transcriptDrop;
+  const overZone = (event) => dropZone.contains(event.target);
+
+  window.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    dropZone.classList.toggle("dropping", overZone(event) && hasFiles(event));
+  });
+  window.addEventListener("dragleave", (event) => {
+    if (!event.relatedTarget) dropZone.classList.remove("dropping");
+  });
+  window.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropZone.classList.remove("dropping");
+    if (!overZone(event)) return;
+    const [file] = (event.dataTransfer && event.dataTransfer.files) || [];
+    if (file) readFile(file);
   });
 
   el.addNode.addEventListener("click", () => createNodeAt());
@@ -388,8 +588,15 @@ export function connectController(graph, notes) {
   /** Brings a node into view in whichever view is on screen. */
   function reveal(node) {
     select("node", node.id);
-    if (state.view === "notes") notes.focus(node.id);
-    else graph.centreOn(node);
+    if (state.view === "notes") {
+      notes.focus(node.id);
+      return;
+    }
+    // Following a link into a folded branch has to open it on the way, or the
+    // map would travel to a spot where the node is not drawn.
+    const opened = openFolds(graph.foldsHiding(node.id));
+    if (opened) toast(`Opened ${opened} branch${opened > 1 ? "es" : ""} to get there`);
+    graph.centreOn(node);
   }
 
   el.viewMap.addEventListener("click", () => setView("map"));
@@ -521,6 +728,17 @@ export function connectController(graph, notes) {
         if (event.shiftKey) toggleExpanded();
         else toggleLogPanel();
         break;
+      case "c": {
+        // Shift+C opens everything, which is the way back when a map has been
+        // folded down to a few branches and the badge you want is off screen.
+        if (event.shiftKey) {
+          const opened = expandAll();
+          toast(opened ? `${opened} branch${opened > 1 ? "es" : ""} opened` : "Nothing folded");
+          break;
+        }
+        if (state.selection?.kind === "node") foldBranch(nodeById(state.selection.id));
+        break;
+      }
       case "/":
         event.preventDefault();
         el.search.focus();
@@ -547,6 +765,7 @@ export function connectController(graph, notes) {
   return {
     onNodeClick,
     onNodeDoubleClick: editNode,
+    onNodeToggle: foldBranch,
     // A card is a node: clicking one selects it, and picks it up in connect
     // mode exactly as clicking it on the canvas would.
     onNoteSelect: onNodeClick,

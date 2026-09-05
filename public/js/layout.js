@@ -10,10 +10,12 @@
  * nothing: on the graph the change is a fill of 26% against 9%, and no two
  * labels landing on top of each other.
  *
- * A chain of only children folds downward instead of claiming a column each,
- * because the width is what decides how far the map has to shrink to fit, and
- * a chain five deep spends five columns to say what one column and five rows
- * say just as well.
+ * A chain of only children folds into a column instead of claiming a column
+ * each, because the width is what decides how far the map has to shrink to fit,
+ * and a chain five deep spends five columns to say what one column and five
+ * rows say just as well. One column, not a staircase: the indent is spent once
+ * where the chain leaves its head, so a chain reads the way every other set of
+ * children on the map already reads.
  *
  * Pure: no DOM, no d3. Sizes come in through `sizeOf`. `test/layout.test.js`
  * covers it.
@@ -35,18 +37,32 @@ export function wingLayout(tree, { sizeOf, gapX = GAP_X, gapY = GAP_Y, indent = 
   const size = new Map(tree.order.map((id) => [id, sizeOf(id)]));
   const rootId = tree.root.id;
   const top = tree.byId.get(rootId).children;
-  const folds = (id) => id !== rootId && tree.byId.get(id).children.length === 1;
+  const folds = (id) => Boolean(id) && id !== rootId && tree.byId.get(id).children.length === 1;
+  const isLink = (id) => folds(tree.byId.get(id).parent);
 
   const side = splitWings(tree, top, rowsPerSubtree(tree));
-  const y = stackWings(tree, top, side, size, gapY);
+  const y = stackWings(tree, top, side, size, gapY, isLink);
 
   const x = new Map([[rootId, 0]]);
   tree.order.forEach((id) => {
     const { parent } = tree.byId.get(id);
     if (!parent) return;
+    // Everything lines up on the edge facing the centre — the edge the bullet
+    // sits on and the eye comes down — so `(cw - pw) / 2` is what turns a
+    // shared edge into the two different middles the nodes are placed by.
+    // Matching middles instead leaves a column with a ragged margin, which
+    // reads as if the labels had been dropped rather than placed.
+    //
+    // The indent is spent once, when the chain leaves its head; every link
+    // after that keeps the column. Charging it per link instead turned a chain
+    // into a staircase drifting away from the branch it belongs to, and a
+    // staircase is the one shape on this map you cannot follow — the children
+    // of a node read as a column everywhere else, so a chain has to as well.
+    const pw = size.get(parent).w;
+    const cw = size.get(id).w;
     const step = folds(parent)
-      ? indent
-      : size.get(parent).w / 2 + gapX + size.get(id).w / 2;
+      ? (cw - pw) / 2 + (isLink(parent) ? 0 : indent)
+      : pw / 2 + gapX + cw / 2;
     x.set(id, x.get(parent) + side.get(id) * step);
   });
 
@@ -98,7 +114,7 @@ function splitWings(tree, top, rows) {
 }
 
 /** Vertical positions: one running cursor per wing, each wing then centred. */
-function stackWings(tree, top, side, size, gapY) {
+function stackWings(tree, top, side, size, gapY, isLink) {
   const y = new Map([[tree.root.id, 0]]);
 
   [1, -1].forEach((dir) => {
@@ -116,9 +132,12 @@ function stackWings(tree, top, side, size, gapY) {
 
     const stack = (id) => {
       const kids = tree.byId.get(id).children;
-      if (!kids.length || kids.length === 1) {
-        // A leaf takes a row. So does a link in a chain, and its only child
-        // takes the next one — that is the fold.
+      // A leaf takes a row. So does a link in a chain, and its only child takes
+      // the next one — that is the fold. A link that turns out to have children
+      // of its own takes a row too, and heads the block they make underneath
+      // it: centring it on them instead would lift it out of the column its
+      // chain is standing in and leave a long thread back to the link above.
+      if (!kids.length || kids.length === 1 || isLink(id)) {
         row(id);
         kids.forEach(stack);
         return;

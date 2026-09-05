@@ -85,7 +85,7 @@ che il server accetta.
 - [ ] 6.4 Script start portabile: oggi passa da PowerShell e gira solo su Windows <!-- size: S -->
 - [ ] 6.5 CHANGELOG.md, cosi' che la dashboard mostri l'ultima release <!-- size: S -->
 
-## 7. Resa: mappa radiale e note <!-- due: 2026-09-04 -->
+## 7. Resa: mappa a due ali e note <!-- due: 2026-09-04 -->
 
 Il force layout non produceva una mind map ma un grafo a nuvola: nessun centro,
 nessun livello, una forma diversa a ogni run. E la citazione estratta dal
@@ -101,3 +101,5 @@ transcript, la cosa piu' utile del pipeline, finiva solo nel JSON.
 - [x] 7.8 Test su tree.js e layout.js, importati da Node senza build <!-- size: M; done: 2026-09-04 -->
 - [x] 7.9 Titolo del centro salvato insieme al grafo, oggi si perde al reload <!-- size: S; done: 2026-09-04 -->
 - [ ] 7.10 Ricerca che evidenzia anche le citazioni nella vista mappa, non solo nelle note <!-- size: S -->
+- [x] 7.11 Layout a due ali al posto degli anelli: figli in colonna, catene ripiegate in colonna sola, etichette allineate sul bordo <!-- size: L; done: 2026-09-05 -->
+- [x] 7.12 Collasso dei rami con badge del conteggio, da badge e da tastiera <!-- size: M; done: 2026-09-05 -->

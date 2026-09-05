@@ -55,17 +55,27 @@
           <section class="block">
             <div class="block-head">
               <h2>Transcript</h2>
-              <button class="link-btn" id="loadSample" type="button">Load sample</button>
+              <div class="head-links">
+                <button class="link-btn" id="openFile" type="button" title="Read a PDF, EPUB, Markdown or text file">Open file…</button>
+                <button class="link-btn" id="loadSample" type="button">Load sample</button>
+              </div>
             </div>
-            <div class="textarea-wrap">
+            <div class="textarea-wrap" id="transcriptDrop">
               <textarea
                 id="transcript"
                 rows="7"
                 spellcheck="false"
-                placeholder="Paste a meeting transcript, interview or set of notes…"
+                placeholder="Paste a transcript, or drop a PDF, EPUB or text file here…"
               ></textarea>
               <span class="char-count" id="charCount">0 characters</span>
+              <span class="drop-hint" aria-hidden="true">Drop the file to read it</span>
             </div>
+            <input
+              id="documentFile"
+              type="file"
+              accept=".pdf,.epub,.txt,.md,.markdown,.vtt,.srt,application/pdf,application/epub+zip,text/plain,text/markdown"
+              hidden
+            />
             <button class="btn btn-primary btn-lg" id="generate" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-spark" /></svg>
               <span id="generateLabel">Generate mind map</span>
@@ -76,6 +86,17 @@
             </div>
             <p class="status" id="status" role="status" data-tone="idle">Ready</p>
           </section>
+
+          <!-- Sections of a file that was read: one row per chapter or heading,
+               so a book is mapped a chapter at a time rather than whole -->
+          <details class="block foldable sections" id="sectionsPanel" hidden>
+            <summary>
+              <span>Sections</span>
+              <span class="log-badge" id="sectionsBadge">0</span>
+            </summary>
+            <p class="hint-inline" id="sectionsSource"></p>
+            <div class="section-list" id="sectionsList" role="list"></div>
+          </details>
 
           <!-- Activity log: the steps of a run, kept after the one-line status
                above has moved on -->
@@ -174,6 +195,8 @@
               <div><dt><kbd>V</kbd></dt><dd>Map / notes</dd></div>
               <div><dt><kbd>F</kbd></dt><dd>Fit to screen</dd></div>
               <div><dt><kbd>R</kbd></dt><dd>Re-run the layout</dd></div>
+              <div><dt><kbd>C</kbd></dt><dd>Fold / open branch</dd></div>
+              <div><dt><kbd>Shift</kbd>+<kbd>C</kbd></dt><dd>Open every branch</dd></div>
               <div><dt><kbd>L</kbd></dt><dd>Activity log</dd></div>
               <div><dt><kbd>/</kbd></dt><dd>Search nodes</dd></div>
               <div><dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Save to library</dd></div>

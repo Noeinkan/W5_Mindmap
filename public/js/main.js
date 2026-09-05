@@ -12,6 +12,7 @@ let delegate = {};
 const graph = createGraph(el.graph, {
   onNodeClick: (node, event) => delegate.onNodeClick?.(node, event),
   onNodeDoubleClick: (node, event) => delegate.onNodeDoubleClick?.(node, event),
+  onNodeToggle: (node, event) => delegate.onNodeToggle?.(node, event),
   onEdgeClick: (edge, event) => delegate.onEdgeClick?.(edge, event),
   onBackgroundClick: () => delegate.onBackgroundClick?.(),
   onZoom: (transform) => delegate.onZoom?.(transform)

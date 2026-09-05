@@ -111,6 +111,74 @@ export function buildTree(nodes, edges, { title = "Central topic" } = {}) {
   };
 }
 
+/**
+ * Cuts the branches the reader has folded away out of the tree, and reports how
+ * many nodes each fold is holding.
+ *
+ * Deliberately not a paint-time filter, which is how the legend hides a type: a
+ * node that keeps its place in the layout while invisible saves no room, and
+ * room is the entire reason to fold a branch. So the cut happens here, before
+ * anything is measured, and what comes out is a smaller tree of the same shape
+ * — every later stage stays unaware that folding exists.
+ *
+ * The tree is returned unchanged when nothing is folded, so the common case
+ * costs one `size` check.
+ *
+ * @param {ReturnType<buildTree>} tree
+ * @param {Set<string>} collapsed
+ * @returns {{tree: ReturnType<buildTree>, hidden: Map<string, number>}}
+ */
+export function collapseTree(tree, collapsed) {
+  const hidden = new Map();
+  if (!tree || !collapsed || !collapsed.size) return { tree, hidden };
+
+  const dropped = new Set();
+  const dropBelow = (id) => {
+    tree.byId.get(id).children.forEach((child) => {
+      dropped.add(child);
+      dropBelow(child);
+    });
+  };
+
+  // From the root down, so a fold inside a folded branch costs nothing: by the
+  // time we would reach it, its whole subtree has already gone.
+  const walk = (id) => {
+    const node = tree.byId.get(id);
+    if (collapsed.has(id) && node.children.length) {
+      const before = dropped.size;
+      dropBelow(id);
+      hidden.set(id, dropped.size - before);
+      return;
+    }
+    node.children.forEach(walk);
+  };
+  walk(tree.root.id);
+
+  if (!dropped.size) return { tree, hidden };
+
+  const byId = new Map();
+  tree.order.forEach((id) => {
+    if (dropped.has(id)) return;
+    const node = tree.byId.get(id);
+    byId.set(id, { ...node, children: node.children.filter((c) => !dropped.has(c)) });
+  });
+  countLeaves(tree.root.id, byId);
+
+  return {
+    tree: {
+      ...tree,
+      byId,
+      order: tree.order.filter((id) => !dropped.has(id)),
+      treeEdges: tree.treeEdges.filter((e) => !dropped.has(e.to)),
+      // A typed relation into a folded branch has nothing to point at any more.
+      // It comes back the moment the branch is opened, because the fold is only
+      // ever a filter over the full tree, never an edit to it.
+      crossEdges: tree.crossEdges.filter((e) => !dropped.has(e.from) && !dropped.has(e.to))
+    },
+    hidden
+  };
+}
+
 /** Connected components over the undirected graph, in node order. */
 function components(ids, both) {
   const seen = new Set();

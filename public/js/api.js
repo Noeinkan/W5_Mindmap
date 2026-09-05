@@ -230,6 +230,47 @@ export async function loadSampleTranscript() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Reading a file                                                      */
+/* ------------------------------------------------------------------ */
+
+// Reading is arithmetic, not a model call: a 460-page novel takes under a second
+// on this machine. A minute means something is wrong, not that it is a big book.
+const INGEST_TIMEOUT_MS = 60000;
+
+/**
+ * Sends a PDF, EPUB or text file to the server and gets back its text, its
+ * sections, and where each section sits inside that text.
+ *
+ * The file goes in the body as it is, rather than in a multipart form: there is
+ * one file and the browser can put a `File` straight on the wire.
+ *
+ * @param {File} file
+ * @returns {Promise<{kind, title, text, chars, units, unitLabel, method, sections, chunkSize, warnings}>}
+ */
+export async function ingestDocument(file, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? INGEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`/api/ingest?name=${encodeURIComponent(file.name || "")}`, {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(await describeFailure(response));
+    return response.json();
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      throw new Error("Reading that file took too long — the server gave up on it.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Saved maps                                                          */
 /* ------------------------------------------------------------------ */
 

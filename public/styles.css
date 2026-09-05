@@ -330,6 +330,33 @@ textarea::placeholder,
   pointer-events: none;
 }
 
+.head-links {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Dropping a file on the transcript box reads it, so the box has to say so
+   while a file is over it. */
+.drop-hint {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed var(--accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent-hi);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.textarea-wrap.dropping .drop-hint {
+  display: flex;
+}
+
 select {
   appearance: none;
   padding-right: 26px;
@@ -655,6 +682,68 @@ select {
 .shortcuts dd {
   margin: 0;
   color: var(--text-dim);
+}
+
+/* ============================================================
+   Sections of a file that was read
+   ============================================================ */
+.sections .hint-inline {
+  margin: 8px 0 0;
+}
+
+.section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  min-height: 60px;
+  overflow: auto;
+  resize: vertical;
+  margin-top: 8px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overscroll-behavior: contain;
+}
+
+.section-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.section-row:hover {
+  background: var(--surface-3);
+}
+
+.section-row[aria-current="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.section-title {
+  font-size: 12px;
+  line-height: 1.35;
+  /* One line per section: a list you can run your eye down beats a list that
+     shows every word of a forty-character heading. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-meta {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ============================================================

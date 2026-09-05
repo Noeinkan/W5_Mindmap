@@ -66,17 +66,23 @@ export function borderPoint(node, tx, ty, pad = 0) {
  * parent sideways and arrives at the child sideways, so a branch and its
  * children read as one stroke of a pen rather than as a corner.
  *
- * A folded chain link sits almost underneath its parent, and there the
- * sideways stroke has nowhere to bend: it leaves downward instead and turns
- * into the child, which is the shape an indented list already has.
+ * A folded chain link sits almost underneath its parent and shares its leading
+ * edge, so the sideways stroke has nowhere to bend. It runs straight down just
+ * inside that shared edge instead — the rail an indented list already draws,
+ * and the edge the bullets are on, so a chain reads as the list it is. Bending
+ * it through the middle instead put a hook under every label in the column.
  */
+const RAIL_INSET = 10;
+
 export function branchControls(from, to) {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   if (Math.abs(dx) < Math.abs(dy) * 0.5) {
+    const side = from.side || Math.sign(dx) || 1;
+    const rail = from.x - side * (from.w / 2 - RAIL_INSET);
     return [
-      { x: from.x, y: from.y + dy * 0.55 },
-      { x: from.x + dx * 0.1, y: to.y }
+      { x: rail, y: from.y + dy * 0.55 },
+      { x: rail, y: to.y }
     ];
   }
   return [

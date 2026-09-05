@@ -8,6 +8,7 @@ const { createOllamaClient, UpstreamError } = require("./lib/ollama");
 const { extractGraph } = require("./lib/extract");
 const { createStore } = require("./lib/store");
 const { createGraphsRouter } = require("./lib/graphs-api");
+const { createIngestRouter } = require("./lib/ingest-api");
 
 const config = loadConfig();
 const client = createOllamaClient(config);
@@ -20,6 +21,9 @@ app.use(express.static(path.join(__dirname, "public")));
 // able to offer "load the sample transcript".
 app.use("/samples", express.static(path.join(__dirname, "samples")));
 app.use("/api/graphs", createGraphsRouter({ store }));
+// Mounted before nothing in particular, but note it takes a raw body of its own:
+// the JSON parser above never sees a PDF.
+app.use("/api/ingest", createIngestRouter({ config }));
 
 app.get("/api/health", async (req, res) => {
   const ollama = await client.health();

@@ -20,7 +20,7 @@
  */
 
 import { state, neighboursOf, isVisible, matchesQuery } from "./state.js";
-import { buildTree, SYNTHETIC_ROOT } from "./tree.js";
+import { buildTree, collapseTree, SYNTHETIC_ROOT } from "./tree.js";
 import { wingLayout } from "./layout.js";
 import { wrapLabel, borderPoint, branchControls, curvePath, ribbonPath } from "./geometry.js";
 import { readPalette, branchColour, fade } from "./palette.js";
@@ -54,10 +54,15 @@ export function createGraph(svgEl, handlers = {}) {
   let branches = [];
   let crossLinks = [];
   let visuals = new Map();
+  /** How many nodes each folded branch is holding, for the badge on it. */
+  let folded = new Map();
   let hoveredId = null;
   let transform = d3.zoomIdentity;
   let mover = null;
   let pendingFit = null;
+  let pendingCentre = null;
+  /** The tree before folding — the only thing that knows where a hidden node was. */
+  let full = null;
 
   const root = { id: SYNTHETIC_ROOT, synthetic: true, label: "", type: null, x: 0, y: 0 };
 
@@ -67,8 +72,13 @@ export function createGraph(svgEl, handlers = {}) {
     .on("zoom", (event) => {
       transform = event.transform;
       viewport.attr("transform", transform);
-      // A pan or zoom by hand outranks a fit we are still waiting to perform.
-      if (event.sourceEvent) pendingFit = null;
+      // A pan or zoom by hand outranks a move of the viewport we are still
+      // waiting to perform. Only a real gesture counts: our own transitions
+      // arrive with no source event.
+      if (event.sourceEvent) {
+        pendingFit = null;
+        pendingCentre = null;
+      }
       handlers.onZoom?.(transform);
     });
 
@@ -90,7 +100,13 @@ export function createGraph(svgEl, handlers = {}) {
   /* ---------------------------------------------------------------- */
 
   function build() {
-    tree = buildTree(state.nodes, state.edges, { title: state.title });
+    // The folded branches come out before anything is measured, so the layout
+    // never knows they existed and the space they took is genuinely given back.
+    const whole = buildTree(state.nodes, state.edges, { title: state.title });
+    const cut = collapseTree(whole, state.collapsed);
+    full = whole;
+    tree = cut.tree;
+    folded = cut.hidden;
     root.label = state.title;
 
     if (!tree) {
@@ -99,10 +115,13 @@ export function createGraph(svgEl, handlers = {}) {
       branches = [];
       crossLinks = [];
       visuals = new Map();
+      folded = new Map();
       return new Map();
     }
 
-    drawables = (tree.root.synthetic ? [root] : []).concat(state.nodes);
+    drawables = (tree.root.synthetic ? [root] : []).concat(
+      state.nodes.filter((n) => tree.byId.has(n.id))
+    );
     byId = new Map(drawables.map((n) => [n.id, n]));
 
     // The hue of a branch comes from the order the centre's children were
@@ -189,6 +208,30 @@ export function createGraph(svgEl, handlers = {}) {
           g.append("line").attr("class", "rule").attr("stroke-linecap", "round");
           g.append("circle").attr("class", "bullet");
           g.append("text").attr("class", "label").attr("pointer-events", "none");
+
+          // The fold badge: a minus while the branch is open, the count of what
+          // it is holding once it is shut. Shut, it has to stay on screen — it
+          // is the only thing saying the branch is there at all — so only the
+          // minus waits for a hover, which keeps a busy map from sprouting a
+          // control on every node.
+          const fold = g.append("g").attr("class", "fold").attr("cursor", "pointer");
+          fold.append("rect").attr("class", "fold-pill");
+          fold
+            .append("text")
+            .attr("class", "fold-mark")
+            .attr("text-anchor", "middle")
+            .attr("dominant-baseline", "central")
+            .attr("pointer-events", "none")
+            .attr("font-weight", 700);
+          fold
+            // The badge sits over the node, so pressing it must not start the
+            // drag underneath and clicking it must not also select the node.
+            .on("mousedown", (event) => event.stopPropagation())
+            .on("click", (event, d) => {
+              event.stopPropagation();
+              handlers.onNodeToggle?.(d, event);
+            });
+
           // Native tooltip, so a label clipped at three lines is still readable.
           g.append("title");
           g.call(dragBehaviour())
@@ -252,7 +295,29 @@ export function createGraph(svgEl, handlers = {}) {
           .attr("cx", bulletX)
           .attr("cy", 0)
           .attr("r", d.synthetic ? 0 : 3.6);
-        g.select("title").text(d.label);
+
+        // The badge straddles the edge the children hang off, so it reads as
+        // the door into them rather than as decoration on the label.
+        const hidden = folded.get(d.id) || 0;
+        const open = tree?.byId.get(d.id)?.children.length || 0;
+        const mark = hidden ? String(hidden) : "−";
+        const pill = Math.max(20, mark.length * 8 + 12);
+        g.select("g.fold")
+          .attr("display", !d.synthetic && (hidden || open) ? null : "none")
+          .attr("transform", `translate(${(d.side || 1) * (d.w / 2)},0)`);
+        g.select("rect.fold-pill")
+          .attr("x", -pill / 2)
+          .attr("y", -9)
+          .attr("width", pill)
+          .attr("height", 18)
+          .attr("rx", 9);
+        g.select("text.fold-mark")
+          .attr("font-size", hidden ? 10.5 : 13)
+          .attr("font-family", getComputedStyle(document.body).fontFamily)
+          .text(mark);
+        g.select("title").text(
+          hidden ? `${d.label} — ${hidden} hidden, click the badge to open` : d.label
+        );
 
         const text = g
           .select("text.label")
@@ -412,7 +477,7 @@ export function createGraph(svgEl, handlers = {}) {
         node.y = target.y;
       });
       drawGeometry();
-      runPendingFit();
+      runPendingView();
     };
 
     if (!animate) {
@@ -486,6 +551,17 @@ export function createGraph(svgEl, handlers = {}) {
           "fill",
           depth === 0 ? palette.accentFg : boxed ? palette.nodeText : palette.text
         );
+
+        const hidden = folded.get(d.id) || 0;
+        const offering = hoveredId === d.id || selected;
+        g.select("g.fold")
+          .attr("opacity", hidden ? 1 : offering ? 1 : 0)
+          .attr("pointer-events", hidden || offering ? "auto" : "none");
+        g.select("rect.fold-pill")
+          .attr("fill", hidden ? colour : palette.canvasBg)
+          .attr("stroke", colour)
+          .attr("stroke-width", 1.6);
+        g.select("text.fold-mark").attr("fill", hidden ? palette.accentFg : colour);
       });
 
     branchLayer
@@ -539,6 +615,7 @@ export function createGraph(svgEl, handlers = {}) {
         mover?.stop();
         mover = null;
         pendingFit = null;
+        pendingCentre = null;
       })
       .on("drag", (event, d) => {
         d.x = event.x;
@@ -640,14 +717,28 @@ export function createGraph(svgEl, handlers = {}) {
     pendingFit = options;
   }
 
-  function runPendingFit() {
-    if (!pendingFit) return;
-    const options = pendingFit;
-    pendingFit = null;
-    fit(options);
+  function runPendingView() {
+    if (pendingFit) {
+      const options = pendingFit;
+      pendingFit = null;
+      fit(options);
+    }
+    if (pendingCentre) {
+      const { node, options } = pendingCentre;
+      pendingCentre = null;
+      centreOn(node, options);
+    }
   }
 
-  function centreOn(node, { duration = 400 } = {}) {
+  function centreOn(node, options = {}) {
+    // Mid-move a node is still at the position it is travelling from, which
+    // after a branch has just been opened is wherever it sat before it was
+    // folded away. Centring on that lands the viewport nowhere.
+    if (mover) {
+      pendingCentre = { node, options };
+      return;
+    }
+    const { duration = 400 } = options;
     const { width, height } = svgEl.getBoundingClientRect();
     const scale = Math.max(transform.k, 0.9);
     svg
@@ -668,6 +759,22 @@ export function createGraph(svgEl, handlers = {}) {
     return { x, y, k: transform.k };
   }
 
+  /**
+   * The folds standing between the centre and `id`, outermost first — empty
+   * when the node is already on screen. Answered from the tree before folding,
+   * which is the only copy that still knows where a hidden node belongs.
+   */
+  function foldsHiding(id) {
+    if (!full || !full.byId.has(id)) return [];
+    const shut = [];
+    let cursor = full.byId.get(id).parent;
+    while (cursor) {
+      if (state.collapsed.has(cursor)) shut.unshift(cursor);
+      cursor = full.byId.get(cursor).parent;
+    }
+    return shut;
+  }
+
   /** Point in graph coordinates at the centre of the viewport. */
   function viewportCentre() {
     const { width, height } = svgEl.getBoundingClientRect();
@@ -686,6 +793,9 @@ export function createGraph(svgEl, handlers = {}) {
     screenPosition,
     viewportCentre,
     bounds,
+    /** How many nodes the fold on `id` is holding — 0 when it is not folded. */
+    hiddenUnder: (id) => folded.get(id) || 0,
+    foldsHiding,
     rootNode: () => root,
     zoomIn: () => zoomBy(1.3),
     zoomOut: () => zoomBy(1 / 1.3),

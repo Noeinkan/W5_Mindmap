@@ -1,6 +1,6 @@
 # Transcript Mind Map
 
-Minimal app that uses a local Ollama model to extract a typed mind‑map graph from a transcript and renders it with an editable D3.js force layout.
+Minimal app that uses a local Ollama model to extract a typed mind‑map graph from a transcript and renders it with an editable D3.js force layout. The transcript can be pasted, or read out of a **PDF, EPUB, Markdown or text file** — a document arrives split into its own sections, so a book is mapped a chapter at a time.
 
 ## Requirements
 
@@ -39,6 +39,9 @@ The status line tells you straight away whether Ollama is reachable and whether 
 | `LINK_PASS` | `1` | One extra call at the end that connects concepts found in different chunks |
 | `KNOWN_LABELS_IN_PROMPT` | `40` | Concepts fed back into later chunk prompts |
 | `GRAPH_STORE_DIR` | `data/graphs` | Where saved maps are written, one JSON file per map. Gitignored |
+| `INGEST_MAX_BYTES` | `67108864` | Biggest file `/api/ingest` will take (64 MB). Reading one costs about twice its size in memory |
+| `INGEST_MAX_CHARS` | `2000000` | Safety valve on the text a file can turn into — not a reading limit, since sections are what keep a run short |
+| `INGEST_MAX_PAGES` | `2000` | Pages read from one PDF |
 | `NODE_ENV` | `development` | `production` hides error details from responses |
 
 ## How extraction works
@@ -53,12 +56,86 @@ The status line tells you straight away whether Ollama is reachable and whether 
 
 Each node carries a `quote`: a verbatim span from the transcript that justifies it. It is the body of the card in the note view, and it is in the exported JSON.
 
+## Reading a file
+
+**Open file…** above the transcript box (or drop a file on the box) reads a PDF,
+an EPUB, or a text file and puts its text in the box. Nothing is uploaded
+anywhere: the file goes to the local server, which turns it into text and
+forgets it.
+
+The reading is done here rather than by a library, in about a thousand lines
+across `lib/pdf-*.js`, `lib/zip.js` and `lib/epub-text.js`. That is a deliberate
+trade — one dependency in the whole project, nothing to install, and a reader
+that can be argued with when a file comes out wrong.
+
+**A PDF has no lines and no words**, only glyphs at coordinates, so the reader
+works those out: a step down the page is a line break, nearly two is a
+paragraph, and a gap wider than an eighth of an em between where one run of
+glyphs ended and the next began is a space — which is how a file that draws one
+word at a time and never writes a space still comes out as prose. Both matrices
+are followed, the text one and the graphics one: a document that positions each
+paragraph with `cm` reads as a single run-on line without the second. What the
+bytes in a string *mean* comes from the font — its `ToUnicode` map where there
+is one, its `/Differences` encoding where there is not — and a simple 8-bit font
+is always read one byte at a time, whatever its character map claims, because
+plenty of files ship a two-byte codespace on an 8-bit font and believing it eats
+every second letter.
+
+**Objects are found by scanning** for `12 0 obj` rather than by trusting the
+cross-reference table at the end, because that table is the first thing to go
+wrong in a file that has been edited or appended to, and a wrong table means "no
+text" rather than "slightly off". Objects packed into compressed object streams —
+most of a PDF written this decade — are unpacked afterwards.
+
+**An EPUB is a ZIP**, so the archive is opened with `node:zlib` and read through
+its own skeleton: the container names the package, the package names the
+chapters and their order, and each chapter's XHTML becomes text with the block
+tags kept as line breaks.
+
+**A scan is refused, not silently emptied.** A PDF averaging less than fifteen
+characters a page has no text layer, and is turned away with a message saying it
+needs OCR — as opposed to an empty transcript and no explanation. A password-
+protected file, a Word document and a plain ZIP each get their own sentence too.
+
+### Sections
+
+A book handed to the extractor whole is three hundred chunks and an hour of
+model time, and what comes back is a map of everything and therefore of nothing.
+So a document arrives already split, and the **Sections** panel lists the parts
+with what each one costs — its characters, and the number of chunks that is.
+Clicking one puts that section in the transcript box and names the map after it.
+
+Where the split comes from, in the order of how much the writer meant it:
+
+1. **The file's own contents** — a PDF's outline (its bookmarks), an EPUB's
+   navigation document or NCX. Real titles, real boundaries. When the list names
+   chapters, the chapters are the split and the top-level entries that are not
+   chapters (preface, glossary, index) are kept as bookends; otherwise the
+   shallowest level with more than one entry on it is used.
+2. **Headings on the page** — `Chapter 4`, `Part II`, `Appendix B`, or a report's
+   `4. Information Delivery`, found near the top of a page. The contents page
+   itself is skipped: it names every heading in the document, in order, and read
+   as openings they would all land on page one.
+3. **One per chapter file**, for an EPUB whose contents list is the single
+   `Start` entry a converter leaves behind.
+4. **Nothing**, for a memo — one section holding the lot, and no panel.
+
+A short document is loaded whole. A long one loads one section — the first that
+is neither a title page nor the size of a book — and leaves the rest in the
+panel.
+
 ## API
 
 - `GET /api/health` → `{ ok, ready, ollama: { url, model, reachable, modelAvailable, models } }`
 - `POST /api/extract` `{ transcript }` → `{ nodes, edges, warnings, chunks, partial, requestId }`
 - `POST /api/extract/stream` `{ transcript }` → server-sent events: `status` (carries `chunks`, `chunkSize` and the `model` name), `progress` (`chunk`, `total`, `chars`), `retry` (a chunk being re-asked, with the `code` that caused it), `graph` (the full merged graph so far, once per chunk, with the `ms` that chunk took), `warning`, `done` (`chunks`, `warnings`, `partial`, `ms`), `error`
 - `GET /samples/<file>` → the bundled sample transcripts in `samples/`
+- `POST /api/ingest?name=<filename>` with the file itself as the body (no
+  multipart form) → `{ ok, kind, title, text, chars, units, unitLabel, method,
+  sections: [{ title, start, end, chars }], chunkSize, truncated, warnings }`.
+  `start`/`end` index into `text`, so a section is a `slice` away. Failures name
+  themselves: `415 unsupported_file`, `413 file_too_large`, `422 no_text` for a
+  scan, `422 encrypted_pdf`, `400 empty_file`
 
 Saved maps, one JSON file each under `GRAPH_STORE_DIR`:
 
@@ -92,6 +169,18 @@ lib/document.js    The server's way into the document rules (imports the browser
 lib/store.js       Saved maps on disk: one JSON file each, atomic writes
 lib/graphs-api.js  The /api/graphs routes: list, save, open, rename, delete
 
+lib/ingest.js      A file into a transcript: sniff the format, read it, tidy it
+lib/ingest-api.js  The /api/ingest route: raw body in, transcript and sections out
+lib/sections.js    Where a document breaks into sections, and how it is put back together
+lib/pdf-lexer.js   PDF objects, found by scanning rather than by the xref table
+lib/pdf-filters.js The stream filters: flate, LZW, ASCII85, run-length, predictors
+lib/pdf-fonts.js   What a font's bytes say, and how wide each glyph is
+lib/pdf-text.js    Pages into text: the matrices, the line breaks, the spaces
+lib/pdf-outline.js The bookmarks, and the destinations they point at
+lib/zip.js         The little of ZIP an EPUB needs
+lib/epub-text.js   Container, package, spine, navigation — a book in reading order
+lib/html-text.js   XHTML into prose, and the whitespace rules the rest agrees on
+
 public/index.html  Markup, icon sprite, canvas overlays
 public/styles.css  Design tokens (light and dark) and every component
 public/notes.css   The note board and its cards
@@ -108,7 +197,8 @@ public/js/graph.js       D3 map view: nodes, branches, viewport
 public/js/notes.js       Note view: one card per concept, with backlinks
 public/js/controller.js  Every control, gesture and keyboard shortcut
 public/js/ui.js          Panels, inspector, legend, toasts, inline label editor
-public/js/api.js         Fetch + SSE client for the extraction routes
+public/js/api.js         Fetch + SSE client for the extraction routes, and the file upload
+public/js/sections.js    The sections panel: the parts of a file that was read
 public/js/log.js         The activity log: every pipeline event, in words
 public/js/exporters.js   JSON and PNG downloads
 ```
@@ -128,6 +218,13 @@ node --test test/*.test.js
 ```
 
 No test dependencies — the built-in `node:test` runner. `test/server.test.js` runs the real Express app against a stub Ollama, so the routes and the SSE stream are covered too; `test/graphs-api.test.js` runs it against a temporary store directory for the saved-map routes. `test/graph-doc.test.js` imports the browser's own document module and checks it agrees with `lib/graph.js`, which is what keeps "the file the app exports" and "the file the server accepts" the same file.
+
+The readers are tested against real bytes: `test/fixtures.js` writes an actual ZIP,
+EPUB and PDF — object by object, with no cross-reference table, because that is what
+the PDF reader claims not to need. `test/pdf-text.test.js` pins down where the line
+breaks and spaces come from, `test/epub-text.test.js` the archive and the two kinds
+of table of contents, `test/sections.test.js` the splitting rules, and
+`test/ingest.test.js` what happens to a file that is not what it says it is.
 
 ## The two views
 
@@ -155,10 +252,13 @@ builds the tree first:
    produces is rarely even, and a branch carrying half the transcript would otherwise
    leave the map hanging off one edge of the screen. Inside a branch the children
    stack downward in a column.
-4. **A chain of only children folds downward**, each link indented from the one above
-   rather than claiming a column of its own. Width is what decides how far the map has
-   to shrink to fit on screen, and a chain five deep spends five columns saying what
-   one column and five rows say just as well.
+4. **A chain of only children folds into a column** rather than claiming a column per
+   link. Width is what decides how far the map has to shrink to fit on screen, and a
+   chain five deep spends five columns saying what one column and five rows say just as
+   well. The indent is spent once, where the chain leaves its head; every link after it
+   keeps the column, lines up on the same leading edge, and is joined to the one above
+   by a short hook on that edge. Charging the indent per link instead drew a staircase
+   drifting away from its own branch — the one shape on the map you cannot follow.
 
 A ring per level came before this and could not be made dense. Labels are wide and
 short, and a ring only grows with its radius while the disc it encloses grows with the
@@ -179,6 +279,20 @@ Node type keeps its own colour, on the dot and in the legend.
 Edges the tree does not use are not dropped — a relation between two branches, or the
 long way round a cycle. They stay as thin dashed curves in their relation colour, with
 an arrowhead, drawn over the branches.
+
+**Branches fold away.** Hover a node and a minus appears on the edge its children hang
+from; click it and the whole branch goes, leaving a badge with the count of what it is
+holding. Click the badge to bring it back, or <kbd>Shift</kbd>+<kbd>C</kbd> to open
+everything at once. This is the answer to a forty-node map being hard to read at all:
+no arrangement of forty labels reads well, so the map you look at is the part you are
+working on. The fold happens before the layout is measured, not by hiding what is
+already drawn — a branch that kept its place while invisible would give no room back,
+and room is the point. Following a link from a note card into a folded branch opens it
+on the way.
+
+Folding is a way of looking at the map rather than a fact about it, so it sits with the
+legend filter and the search box: it is not written into the saved document, and
+opening a different map starts with everything open.
 
 The layout is deterministic: same graph, same picture, run after run. Drag a node and
 it stays where you put it; `R` hands every node back to the layout.
@@ -234,6 +348,12 @@ file meant to be read they are noise.
 Paste a transcript in the left panel and press **Generate mind map** (or `Ctrl`+`Enter`
 inside the box). **Load sample** fills it with `samples/client-kickoff.txt`. The map
 streams in chunk by chunk and fits itself to the screen when the run finishes.
+
+**Open file…** — next to *Load sample*, or drop the file straight on the transcript
+box — reads a PDF, an EPUB, a Markdown or a text file into the box instead. A
+document with parts to it brings a **Sections** panel with it: one row per chapter
+or heading, each saying how many characters and how many chunks it is. Click a row
+to map that part, and the centre of the map takes its name.
 
 **Activity log.** The status line under the button holds one sentence at a time. The
 **Activity log** panel below it keeps all of them, timestamped: how many chunks the
