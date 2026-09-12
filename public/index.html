@@ -35,6 +35,7 @@
         <g id="i-chevron"><path d="M9 6l6 6-6 6" /></g>
         <g id="i-map"><circle cx="12" cy="12" r="2.6" /><path d="M12 9.4V6a2 2 0 0 1 2-2h3M12 14.6V18a2 2 0 0 0 2 2h3M9.4 12H6a2 2 0 0 0-2 2v2" /></g>
         <g id="i-cards"><path d="M4 6h7v12H4zM13 6h7v6h-7zM13 14h7v4h-7z" /></g>
+        <g id="i-flow"><circle cx="4.6" cy="12" r="2.2" /><circle cx="12" cy="6.6" r="2.2" /><circle cx="12" cy="17.4" r="2.2" /><circle cx="19.4" cy="12" r="2.2" /><path d="M6.4 10.7l3.8-2.8M6.4 13.3l3.8 2.8M13.8 7.9l3.8 2.8M13.8 16.1l3.8-2.8" /></g>
       </defs>
     </svg>
 
@@ -76,6 +77,23 @@
               accept=".pdf,.epub,.txt,.md,.markdown,.vtt,.srt,application/pdf,application/epub+zip,text/plain,text/markdown"
               hidden
             />
+            <!-- Which model reads the transcript. The choice is the browser's,
+                 not the server's, and it is sent with each run — so this is the
+                 last thing above the button that starts one. -->
+            <div class="model-picker" id="modelPicker" hidden>
+              <!-- One per row rather than side by side: a model id runs to
+                   "gemini-3.1-flash-lite" and half the sidebar cuts it in two. -->
+              <label class="mini-field">
+                <span>AI provider</span>
+                <select id="aiProvider"></select>
+              </label>
+              <label class="mini-field">
+                <span>Model</span>
+                <select id="aiModel"></select>
+              </label>
+              <p class="hint-inline" id="modelNote"></p>
+            </div>
+
             <button class="btn btn-primary btn-lg" id="generate" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-spark" /></svg>
               <span id="generateLabel">Generate mind map</span>
@@ -192,7 +210,7 @@
               <div><dt><kbd>E</kbd></dt><dd>Connect mode</dd></div>
               <div><dt><kbd>Enter</kbd></dt><dd>Rename selection</dd></div>
               <div><dt><kbd>Del</kbd></dt><dd>Delete selection</dd></div>
-              <div><dt><kbd>V</kbd></dt><dd>Map / notes</dd></div>
+              <div><dt><kbd>V</kbd></dt><dd>Map / notes / flow</dd></div>
               <div><dt><kbd>F</kbd></dt><dd>Fit to screen</dd></div>
               <div><dt><kbd>R</kbd></dt><dd>Re-run the layout</dd></div>
               <div><dt><kbd>C</kbd></dt><dd>Fold / open branch</dd></div>
@@ -214,6 +232,41 @@
         <!-- note view: the same graph as Zettelkasten cards, over the canvas -->
         <div class="notes-board" id="notes" aria-label="Notes" hidden></div>
 
+        <!-- flow view: the same graph as a chain of cause and effect -->
+        <svg class="flow-canvas" id="flow" aria-label="Cause and effect" hidden></svg>
+
+        <!--
+          The caption strip. A layered diagram carries three conventions the
+          reader has no way of guessing — which way it is read, what the signs
+          on the arrows mean, and what R and B stand for — so they are written
+          under it rather than left to a legend somewhere else.
+        -->
+        <div class="overlay overlay-bl flow-bar" id="flowBar" hidden>
+          <div class="flow-read">
+            <span class="flow-dir">Causes<span class="flow-arrow">→</span>effects</span>
+            <span class="flow-stat" id="flowStat"></span>
+          </div>
+          <div class="flow-keys" id="flowKeys"></div>
+          <button class="link-btn" id="flowDeepen" type="button" title="Read the transcript again, this time for cause and effect">
+            Re-read for cause &amp; effect
+          </button>
+        </div>
+
+        <!-- Shown instead of the diagram when the map records no influence yet -->
+        <div class="flow-none" id="flowEmpty" hidden>
+          <svg viewBox="0 0 24 24" class="empty-icon" aria-hidden="true"><use href="#i-flow" /></svg>
+          <h2>Nothing leads anywhere yet</h2>
+          <p id="flowEmptyWhy">
+            This view draws the arrows that claim an influence — <em>causes</em>,
+            <em>supports</em> and <em>contrasts</em>. The map has none of those yet, only
+            plain <em>relates</em> links.
+          </p>
+          <div class="empty-actions">
+            <button class="btn btn-primary" id="flowEmptyDeepen" type="button">Re-read for cause &amp; effect</button>
+            <button class="btn btn-ghost" id="flowEmptyBack" type="button">Back to the map</button>
+          </div>
+        </div>
+
         <!-- top-left: sidebar toggle + view switch + search -->
         <div class="overlay overlay-tl">
           <button class="icon-btn" id="toggleSidebar" type="button" aria-label="Hide panel" title="Hide panel">
@@ -225,6 +278,9 @@
             </button>
             <button class="seg" id="viewNotes" type="button" role="tab" aria-selected="false" title="Zettelkasten notes (V)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-cards" /></svg>Notes
+            </button>
+            <button class="seg" id="viewFlow" type="button" role="tab" aria-selected="false" title="Cause and effect (V)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-flow" /></svg>Flow
             </button>
           </div>
           <div class="search">

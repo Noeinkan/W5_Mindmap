@@ -15,7 +15,13 @@ const IDLE_TIMEOUT_MS = 45000;
  *   `onEvent` sees every pipeline event verbatim — the server's own, plus the
  *   client-side ones (request opened, stream closed) that the status line never
  *   had a place for. It is what feeds the activity log.
- * @param {{connectTimeoutMs?:number, idleTimeoutMs?:number}} [options] Overridable for tests.
+ * @param {{connectTimeoutMs?:number, idleTimeoutMs?:number, provider?:string, model?:string, mode?:string}} [options]
+ *   `provider` and `model` are the sidebar switch. Left out, the server uses its own
+ *   configured default — which is what happens if /api/providers never answered.
+ *   `mode` is which reading to ask for: "mindmap" (the default) or "causal", the
+ *   chain of cause and effect the flow view draws. Both answer in the same schema,
+ *   so the same handlers below serve either.
+ *   The timeouts are overridable for tests.
  */
 export async function generateMindMap(transcript, handlers, options = {}) {
   const connectTimeoutMs = options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
@@ -56,12 +62,23 @@ export async function generateMindMap(transcript, handlers, options = {}) {
 
   watch(connectTimeoutMs);
 
+  const body = { transcript };
+  if (options.provider) body.provider = options.provider;
+  if (options.model) body.model = options.model;
+  // Which reading to ask for. Left out, the server reads for a mind map, which
+  // is what every caller before the flow view wanted and still wants.
+  if (options.mode) body.mode = options.mode;
+
   try {
-    client(`POST /api/extract/stream — ${transcript.length.toLocaleString()} characters sent`);
+    const using = options.provider ? ` on ${options.provider}${options.model ? `/${options.model}` : ""}` : "";
+    const reading = options.mode && options.mode !== "mindmap" ? ` — reading for ${options.mode}` : "";
+    client(
+      `POST /api/extract/stream — ${transcript.length.toLocaleString()} characters sent${using}${reading}`
+    );
     const response = await fetch("/api/extract/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transcript }),
+      body: JSON.stringify(body),
       signal: controller.signal
     });
 

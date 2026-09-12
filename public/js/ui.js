@@ -132,12 +132,82 @@ export function syncPanels() {
 }
 
 function syncView() {
-  const notes = state.view === "notes";
-  el.notes.hidden = !notes;
-  el.viewMap.setAttribute("aria-selected", String(!notes));
-  el.viewNotes.setAttribute("aria-selected", String(notes));
-  // Zoom and fit belong to the canvas; the note board scrolls instead.
-  el.zoomBar.hidden = notes;
+  const view = state.view;
+  el.notes.hidden = view !== "notes";
+  // `hidden` is a property of HTMLElement, and the flow canvas is an <svg> —
+  // an SVGSVGElement, which inherits from Element and never sees that property.
+  // Assigning to it there sets a plain expando that reads back correctly and
+  // changes nothing on screen, so the attribute has to be written directly.
+  el.flow.toggleAttribute("hidden", view !== "flow");
+  el.viewMap.setAttribute("aria-selected", String(view === "map"));
+  el.viewNotes.setAttribute("aria-selected", String(view === "notes"));
+  el.viewFlow.setAttribute("aria-selected", String(view === "flow"));
+  // Zoom and fit belong to a canvas; the note board scrolls instead. The flow
+  // view is a canvas like the map, so it keeps them.
+  el.zoomBar.hidden = view === "notes";
+  if (view !== "flow") {
+    el.flowBar.hidden = true;
+    el.flowEmpty.hidden = true;
+  }
+}
+
+/**
+ * The caption strip under the flow diagram.
+ *
+ * A layered causal diagram carries three conventions the picture cannot state
+ * for itself — which way it is read, what a sign on an arrow means, and what R
+ * and B stand for — and a reader who does not already know them reads the
+ * diagram wrong rather than not at all. So they are written under it, and only
+ * the ones the diagram on screen actually uses: a key for a notation that is
+ * not there is noise, and noise is what makes a legend stop being read.
+ *
+ * @param {ReturnType<ReturnType<import("./flow.js").createFlow>["summary"]>} summary
+ */
+export function syncFlowCaption(summary) {
+  if (state.view !== "flow") return;
+
+  el.flowEmpty.hidden = summary.ok;
+  el.flowBar.hidden = !summary.ok;
+  if (!summary.ok) {
+    el.flowEmptyWhy.innerHTML = state.nodes.length
+      ? 'This view draws the arrows that claim an influence — <em>causes</em>, <em>supports</em> and <em>contrasts</em>. This map has none of those yet, only plain <em>relates</em> links.'
+      : "There is no map yet. Generate one from a transcript, or add a few nodes and connect them.";
+    return;
+  }
+
+  const loops = summary.loops.length;
+  const parts = [
+    `${summary.nodes} factor${summary.nodes === 1 ? "" : "s"}`,
+    `${summary.depth} step${summary.depth === 1 ? "" : "s"} deep`
+  ];
+  if (loops) parts.push(`${loops} feedback loop${loops === 1 ? "" : "s"}`);
+  // Concepts the map holds that no arrow of influence touches. Said out loud,
+  // because a diagram quietly showing eleven of a map's thirty concepts is a
+  // diagram the reader will trust for something it never claimed.
+  if (summary.omitted) parts.push(`${summary.omitted} not in any chain`);
+  el.flowStat.textContent = `— ${parts.join(", ")}`;
+
+  const keys = [];
+  if (summary.signs.plus) keys.push(["plus", "+", "same direction"]);
+  if (summary.signs.minus) keys.push(["minus", "−", "opposite direction"]);
+  if (summary.loops.some((l) => l.kind === "reinforcing")) {
+    keys.push(["reinforcing", "R", "reinforcing loop"]);
+  }
+  if (summary.loops.some((l) => l.kind === "balancing")) {
+    keys.push(["balancing", "B", "balancing loop"]);
+  }
+
+  el.flowKeys.textContent = "";
+  keys.forEach(([kind, mark, meaning]) => {
+    const key = document.createElement("span");
+    key.className = "flow-key";
+    key.dataset.key = kind;
+    const badge = document.createElement("b");
+    badge.textContent = mark;
+    key.appendChild(badge);
+    key.appendChild(document.createTextNode(meaning));
+    el.flowKeys.appendChild(key);
+  });
 }
 
 function syncInspector() {
@@ -193,7 +263,10 @@ function syncToolbar() {
 }
 
 function syncEmptyState() {
-  el.empty.hidden = state.nodes.length > 0;
+  // The flow view has an empty state of its own, which can say the more useful
+  // thing: a map with plenty of nodes and no influence between them is not the
+  // same problem as no map at all.
+  el.empty.hidden = state.nodes.length > 0 || state.view === "flow";
 }
 
 function syncSearchCount() {

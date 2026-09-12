@@ -255,3 +255,57 @@ test("an empty transcript yields an empty graph, not an error", async () => {
   assert.deepEqual(result.nodes, []);
   assert.equal(result.chunks, 0);
 });
+
+/* ------------------------------------------------------------------ */
+/* Reading modes                                                       */
+/* ------------------------------------------------------------------ */
+
+test("the default reading asks for a mind map", async () => {
+  const client = fakeClient([graphFor("c1_", ["A", "B"]), graphFor("c2_", ["C"]), graphFor("c3_", ["D"])]);
+  await extractGraph({ transcript: TRANSCRIPT, config, client });
+
+  assert.match(client.prompts[0], /Extract a mind-map/);
+});
+
+test("the causal reading asks for cause and effect instead", async () => {
+  const client = fakeClient([graphFor("c1_", ["A", "B"]), graphFor("c2_", ["C"]), graphFor("c3_", ["D"])]);
+  await extractGraph({ transcript: TRANSCRIPT, config, client, mode: "causal" });
+
+  assert.match(client.prompts[0], /CAUSE AND EFFECT/);
+  // The two instructions that make the difference between a chain and the star
+  // a model returns when it is only told to look for causes.
+  assert.match(client.prompts[0], /Build CHAINS, not stars/);
+  assert.match(client.prompts[0], /feeds back/);
+});
+
+test("both readings answer in the same schema, so the graph comes out the same", async () => {
+  const answers = [graphFor("c1_", ["EIR Problems", "Handover Data"]), graphFor("c2_", ["Capability Check"]), graphFor("c3_", ["Audit"])];
+  const plain = await extractGraph({ transcript: TRANSCRIPT, config, client: fakeClient(answers) });
+  const causal = await extractGraph({ transcript: TRANSCRIPT, config, client: fakeClient(answers), mode: "causal" });
+
+  assert.deepEqual(causal.nodes, plain.nodes);
+  assert.deepEqual(causal.edges, plain.edges);
+});
+
+test("a mode nobody has heard of falls back to the mind map", async () => {
+  const client = fakeClient([graphFor("c1_", ["A", "B"]), graphFor("c2_", ["C"]), graphFor("c3_", ["D"])]);
+  // Refusing would cost a whole run over a spelling, and the map the caller
+  // gets is the one they would have got before the modes existed.
+  await extractGraph({ transcript: TRANSCRIPT, config, client, mode: "chain-reaction" });
+
+  assert.match(client.prompts[0], /Extract a mind-map/);
+});
+
+test("the reading used is reported, so the log can say which one produced a map", async () => {
+  const client = fakeClient([graphFor("c1_", ["A", "B"]), graphFor("c2_", ["C"]), graphFor("c3_", ["D"])]);
+  const events = [];
+  await extractGraph({
+    transcript: TRANSCRIPT,
+    config,
+    client,
+    mode: "causal",
+    onEvent: (event) => events.push(event)
+  });
+
+  assert.equal(events.find((e) => e.type === "status").mode, "causal");
+});

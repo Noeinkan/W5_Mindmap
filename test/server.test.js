@@ -242,6 +242,122 @@ test("a mid-run Ollama failure ends in done-with-warning, keeping the partial ma
   assert.equal(last.data.warnings[0].code, "ollama_failed");
 });
 
+/* ------------------------------------------------------------------ */
+/* Choosing the model                                                  */
+/* ------------------------------------------------------------------ */
+
+test("health reports Gemini alongside Ollama, and says when it has no key", async () => {
+  handleUpstream = () => ({ body: { models: [{ name: "test-model:1b" }] } });
+
+  const data = await fetch(`${baseUrl}/api/health`).then((r) => r.json());
+
+  assert.equal(data.provider, "ollama");
+  assert.equal(data.gemini.configured, false);
+  assert.match(data.gemini.error, /GEMINI_API_KEY/);
+  // Readiness follows the active provider, which is still the local one.
+  assert.equal(data.ready, true);
+});
+
+test("the browser is told both providers and the models each can run", async () => {
+  handleUpstream = () => ({
+    body: { models: [{ name: "test-model:1b" }, { name: "other-model:7b" }] }
+  });
+
+  const data = await fetch(`${baseUrl}/api/providers`).then((r) => r.json());
+  const byId = Object.fromEntries(data.providers.map((p) => [p.id, p]));
+
+  assert.equal(data.active, "ollama");
+  assert.equal(byId.ollama.available, true);
+  assert.deepEqual(byId.ollama.models, ["test-model:1b", "other-model:7b"]);
+  // Offered but not selectable, with the one sentence that says how to fix it.
+  assert.equal(byId.gemini.available, false);
+  assert.match(byId.gemini.note, /GEMINI_API_KEY/);
+  assert.ok(byId.gemini.models.length > 0);
+});
+
+test("an unreachable Ollama still lists its model, and says how to start it", async () => {
+  handleUpstream = () => ({ status: 500, body: { error: "down" } });
+
+  const data = await fetch(`${baseUrl}/api/providers`).then((r) => r.json());
+  const ollama = data.providers.find((p) => p.id === "ollama");
+
+  assert.equal(ollama.ready, false);
+  assert.deepEqual(ollama.models, ["test-model:1b"]);
+  assert.match(ollama.note, /ollama serve/);
+});
+
+test("picking Gemini without a key is a 400 that names the missing setting", async () => {
+  let called = false;
+  handleUpstream = () => {
+    called = true;
+    return { body: {} };
+  };
+
+  const response = await fetch(`${baseUrl}/api/extract`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript: TRANSCRIPT, provider: "gemini" })
+  });
+  const data = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(data.code, "provider_unavailable");
+  assert.match(data.error, /GEMINI_API_KEY/);
+  assert.equal(called, false, "no model should have been called");
+});
+
+test("a model id the server does not recognise is refused before any call is made", async () => {
+  let called = false;
+  handleUpstream = () => {
+    called = true;
+    return { body: {} };
+  };
+
+  const response = await fetch(`${baseUrl}/api/extract`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript: TRANSCRIPT, model: "not a model id" })
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, "unknown_model");
+  assert.equal(called, false);
+});
+
+test("a model named in the request is the one that gets asked", async () => {
+  const seen = [];
+  handleUpstream = (url, body) => {
+    seen.push(JSON.parse(body).model);
+    return { body: graphResponse(["EIR Problems"], "c1_") };
+  };
+
+  await fetch(`${baseUrl}/api/extract`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript: TRANSCRIPT, provider: "ollama", model: "other-model:7b" })
+  });
+
+  assert.ok(seen.length > 0);
+  assert.ok(
+    seen.every((model) => model === "other-model:7b"),
+    `expected every call on other-model:7b, got ${seen.join(", ")}`
+  );
+});
+
+test("an impossible choice on the streaming route arrives as an error event", async () => {
+  const text = await fetch(`${baseUrl}/api/extract/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript: TRANSCRIPT, provider: "gemini" })
+  }).then((r) => r.text());
+
+  const events = parseSse(text);
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "error");
+  assert.equal(events[0].data.code, "provider_unavailable");
+});
+
 function parseSse(text) {
   return text
     .split("\n\n")

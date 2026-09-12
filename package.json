@@ -4,8 +4,8 @@
   "private": true,
   "main": "server.js",
   "scripts": {
-    "start": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-NetTCPConnection -LocalPort 3200 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop } catch { } } ; Start-Process \\\"http://localhost:3200\\\"; node server.js\"",
-    "dev": "node server.js",
+    "start": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-NetTCPConnection -LocalPort 3200 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop } catch { } } ; Start-Process \\\"http://localhost:3200\\\"; node --env-file-if-exists=.env server.js\"",
+    "dev": "node --env-file-if-exists=.env server.js",
     "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {

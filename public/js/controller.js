@@ -26,11 +26,13 @@ import {
   unpinAll,
   matchesQuery,
   normalizeNodeType,
-  normalizeEdgeType
+  normalizeEdgeType,
+  VIEWS
 } from "./state.js";
 import { SYNTHETIC_ROOT } from "./tree.js";
 import { generateMindMap, loadSampleTranscript, ingestDocument } from "./api.js";
 import { initSections, showDocument, clearDocument, choose, WHOLE_DOCUMENT } from "./sections.js";
+import { initModelPicker, currentChoice, describeChoice } from "./model-picker.js";
 import { exportJson, exportPng } from "./exporters.js";
 import { readDocument } from "./graph-doc.js";
 import { applyDocument, scheduleAutosave } from "./session.js";
@@ -59,10 +61,21 @@ import {
   isLogExpanded
 } from "./log.js";
 
-export function connectController(graph, notes) {
+export function connectController(graph, notes, flow) {
   // Whether the map's title came from a file — a book's own title, or the
   // chapter's. It survives until the transcript is typed over or replaced.
   let titleFromFile = false;
+  /** A causal re-read is in flight. See `deepenCausal`. */
+  let reading = false;
+
+  /**
+   * The canvas currently under the pointer: the map, or the flow diagram.
+   *
+   * Zoom, fit and the inline label editor all need to act on whichever one is
+   * on screen, and the note board is neither — it scrolls, and its zoom bar is
+   * hidden, so it never gets asked.
+   */
+  const canvas = () => (state.view === "flow" ? flow : graph);
 
   /* ---------------------------- Graph gestures --------------------- */
 
@@ -129,10 +142,10 @@ export function connectController(graph, notes) {
     // Renaming the centre renames the map, not a node: it is the one label on
     // the canvas that has no row in the graph.
     if (node.id === SYNTHETIC_ROOT) {
-      openInlineEditor(node, graph, (label) => setTitle(label));
+      openInlineEditor(node, canvas(), (label) => setTitle(label));
       return;
     }
-    openInlineEditor(node, graph, (label) => {
+    openInlineEditor(node, canvas(), (label) => {
       withHistory(() => {
         const target = nodeById(node.id);
         if (target) target.label = label;
@@ -191,8 +204,9 @@ export function connectController(graph, notes) {
       return;
     }
 
+    const using = describeChoice();
     setBusy(true);
-    setStatus("Sending the transcript to the model…", "busy");
+    setStatus(using ? `Sending the transcript to ${using}…` : "Sending the transcript to the model…", "busy");
     logRunStart(transcript.length);
     setTranscript(transcript);
     // A map generated from scratch is a new map: Save must not land on top of
@@ -252,7 +266,92 @@ export function connectController(graph, notes) {
         }
         toast("Extraction failed", "error", 3600);
       }
-    });
+    },
+    // Read at the moment the run starts, not when the page loaded: the switch is
+    // free to be moved between two runs.
+    currentChoice());
+    setBusy(false);
+  }
+
+  /**
+   * Reads the transcript again, this time for cause and effect.
+   *
+   * The flow view works on whatever influence the map already records, which
+   * for a map built by the mind-map reading is usually thin: asked for a mind
+   * map, the model returns structure, and the arrows that carry causality are
+   * a by-product. This asks for the causality directly.
+   *
+   * It replaces the map rather than adding to it. Merging the two readings
+   * sounds kinder and is worse: the same concept comes back under two labels
+   * and the merge leaves a graph that is neither reading, with chains half
+   * joined to a structure that disagrees with them. One undo step puts the old
+   * map back, which is the honest way to offer it.
+   */
+  async function deepenCausal() {
+    // The buttons stay clickable while a run is going — they are not the
+    // Generate button, which `setBusy` disables — and a second run started on
+    // top of the first would race it into `setGraph`, leaving a map made of
+    // half of each. One is enough.
+    if (reading) {
+      toast("Already reading — give it a moment", "info");
+      return;
+    }
+
+    const transcript = (state.transcript || el.transcript.value).trim();
+    if (!transcript) {
+      toast("There is no transcript to re-read — this map came from a file or was built by hand", "error", 4800);
+      return;
+    }
+
+    reading = true;
+    setBusy(true);
+    // A new reading is a new map, so Save must not land on top of whichever
+    // library entry happened to be open — the same rule `generate` follows.
+    setOpenGraph(null);
+    setStatus("Reading the transcript for cause and effect…", "busy");
+    logRunStart(transcript.length);
+    logLine("Causal reading — asking for chains of influence, not structure", "info");
+    let received = false;
+
+    await generateMindMap(
+      transcript,
+      {
+        onStatus: (message) => setStatus(message, "busy"),
+        onEvent: logServerEvent,
+        onGraph: (data) => {
+          received = true;
+          withHistory(() => setGraph(data));
+          setStatus("Building the chain…", "busy");
+        },
+        onDone: () => {
+          setBusy(false);
+          if (!received) return;
+          const found = flow.summary();
+          const loops = found.loops.length;
+          setStatus(
+            found.ok
+              ? `Done — ${found.nodes} factors, ${found.depth} steps deep${loops ? `, ${loops} feedback loop${loops === 1 ? "" : "s"}` : ""}`
+              : "Done — but the model found no cause-and-effect links",
+            found.ok ? "ok" : "error"
+          );
+          requestAnimationFrame(() => flow.fit({ duration: 0 }));
+          toast(
+            found.ok
+              ? "Cause and effect read — Ctrl+Z puts the old map back"
+              : "No influence found — try a longer transcript",
+            found.ok ? "ok" : "error",
+            found.ok ? 4200 : 4600
+          );
+        },
+        onError: (message) => {
+          setBusy(false);
+          setStatus(message, "error");
+          toast("Causal reading failed", "error", 3600);
+        }
+      },
+      { ...currentChoice(), mode: "causal" }
+    );
+    reading = false;
     setBusy(false);
   }
 
@@ -471,6 +570,15 @@ export function connectController(graph, notes) {
   });
   initSidebar(() => graph.resize());
   initLog({ notify: toast });
+  // Asks the server which models are usable, so it settles a moment after the rest
+  // of the page. Not awaited: nothing else waits on it, and a server that cannot
+  // answer just leaves the switch hidden.
+  initModelPicker({
+    onChange: (choice) =>
+      logLine(`Model switched to ${choice.provider} (${choice.model})`, "info")
+  }).then((choice) => {
+    if (choice) logLine(`Model ready — ${choice.provider} (${choice.model})`, "info");
+  });
   // Picking a section replaces what is in the box, and names the map after it:
   // a map of chapter seven should not be called after the whole book.
   initSections({
@@ -592,6 +700,17 @@ export function connectController(graph, notes) {
       notes.focus(node.id);
       return;
     }
+    if (state.view === "flow") {
+      // A concept no arrow of influence touches is not on this diagram at all,
+      // so travelling to it would leave the viewport looking at nothing. Say
+      // where it is instead of silently doing nothing.
+      if (!flow.has(node.id)) {
+        toast(`“${node.label}” is in no chain of cause and effect — look on the map`, "info", 3600);
+        return;
+      }
+      flow.centreOn(node);
+      return;
+    }
     // Following a link into a folded branch has to open it on the way, or the
     // map would travel to a spot where the node is not drawn.
     const opened = openFolds(graph.foldsHiding(node.id));
@@ -599,12 +718,68 @@ export function connectController(graph, notes) {
     graph.centreOn(node);
   }
 
-  el.viewMap.addEventListener("click", () => setView("map"));
-  el.viewNotes.addEventListener("click", () => setView("notes"));
+  /**
+   * Switches view, and fits the flow diagram the first time it is looked at.
+   *
+   * It is laid out from the moment the graph changes, but it is laid out on a
+   * canvas of zero size while it is hidden, so the viewport it inherits is the
+   * one from before it had anything to show. Fitting on arrival is what puts
+   * the whole chain on screen instead of a corner of it.
+   */
+  function showView(view) {
+    const changed = state.view !== view;
+    setView(view);
+    if (changed && view === "flow") requestAnimationFrame(() => flow.fit({ duration: 0 }));
+  }
 
-  el.zoomIn.addEventListener("click", graph.zoomIn);
-  el.zoomOut.addEventListener("click", graph.zoomOut);
-  el.zoomFit.addEventListener("click", () => graph.fit());
+  el.viewMap.addEventListener("click", () => showView("map"));
+  el.viewNotes.addEventListener("click", () => showView("notes"));
+  el.viewFlow.addEventListener("click", () => showView("flow"));
+
+  el.zoomIn.addEventListener("click", () => canvas().zoomIn());
+  el.zoomOut.addEventListener("click", () => canvas().zoomOut());
+  el.zoomFit.addEventListener("click", () => canvas().fit());
+
+  el.flowEmptyBack.addEventListener("click", () => showView("map"));
+
+  /**
+   * The causal re-read asks twice before it runs, in the button itself.
+   *
+   * It throws the map on screen away and then takes minutes to build its
+   * replacement, which is more than one click should be able to start. A
+   * browser `confirm()` would do the job and is the one thing in this app that
+   * stops the page dead, so the question is asked where the answer is — the
+   * same trade the library makes when it deletes a saved map.
+   *
+   * There is nothing to lose on an empty canvas, so there it runs at once.
+   */
+  function armDeepen(button) {
+    const idle = button.textContent;
+    let armed = null;
+
+    const disarm = () => {
+      clearTimeout(armed);
+      armed = null;
+      button.textContent = idle;
+      button.classList.remove("is-arming");
+    };
+
+    button.addEventListener("click", () => {
+      if (armed || !state.nodes.length) {
+        disarm();
+        deepenCausal();
+        return;
+      }
+      button.textContent = "Replace this map? Click again";
+      button.classList.add("is-arming");
+      // Disarms itself, so a button left armed cannot fire on a stray click
+      // made minutes later for some other reason.
+      armed = setTimeout(disarm, 6000);
+    });
+  }
+
+  armDeepen(el.flowDeepen);
+  armDeepen(el.flowEmptyDeepen);
 
   el.modeBannerExit.addEventListener("click", () => setConnectMode(false));
 
@@ -637,8 +812,12 @@ export function connectController(graph, notes) {
         exportJson();
         toast("mindmap.json downloaded", "ok");
       } else {
-        await exportPng(graph);
-        toast("mindmap.png downloaded", "ok");
+        // Whatever is on screen: from the flow view the picture worth having is
+        // the chain, not the map behind it. The note board has no canvas of its
+        // own, so it exports the map — which is what its cards are ordered by.
+        const name = state.view === "flow" ? "cause-and-effect.png" : "mindmap.png";
+        await exportPng(canvas(), name);
+        toast(`${name} downloaded`, "ok");
       }
     } catch (err) {
       toast(err.message || "Export failed", "error");
@@ -710,10 +889,12 @@ export function connectController(graph, notes) {
         setConnectMode(!state.connectMode);
         break;
       case "f":
-        graph.fit();
+        canvas().fit();
         break;
       case "v":
-        setView(state.view === "map" ? "notes" : "map");
+        // Round the three in the order they sit in the toolbar, so the key and
+        // the buttons tell the same story about what comes next.
+        showView(VIEWS[(VIEWS.indexOf(state.view) + 1) % VIEWS.length]);
         break;
       case "r": {
         // Hands every hand-placed node back to the radial layout.

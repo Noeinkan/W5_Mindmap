@@ -3,3 +3,6 @@
 
 # Saved maps: the user's own meetings, one JSON file each (GRAPH_STORE_DIR)
 data/
+
+# Local settings, and the Gemini API key with them. Copy .env.example to .env.
+.env

@@ -18,7 +18,7 @@ import {
 // from the state it is already importing.
 export { NODE_TYPES, EDGE_TYPES, normalizeNodeType, normalizeEdgeType };
 
-export const VIEWS = ["map", "notes"];
+export const VIEWS = ["map", "notes", "flow"];
 
 export const state = {
   nodes: [],
@@ -36,7 +36,7 @@ export const state = {
    */
   collapsed: new Set(),
   query: "",
-  /** Which renderer owns the canvas: the radial map, or the note cards. */
+  /** Which renderer owns the canvas: the map, the note cards, or the flow. */
   view: "map",
   /** Label of the map's centre when the graph has no single natural root. */
   title: DEFAULT_TITLE,

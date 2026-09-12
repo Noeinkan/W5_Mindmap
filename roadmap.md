@@ -103,3 +103,29 @@ transcript, la cosa piu' utile del pipeline, finiva solo nel JSON.
 - [ ] 7.10 Ricerca che evidenzia anche le citazioni nella vista mappa, non solo nelle note <!-- size: S -->
 - [x] 7.11 Layout a due ali al posto degli anelli: figli in colonna, catene ripiegate in colonna sola, etichette allineate sul bordo <!-- size: L; done: 2026-09-05 -->
 - [x] 7.12 Collasso dei rami con badge del conteggio, da badge e da tastiera <!-- size: M; done: 2026-09-05 -->
+
+## 8. Terza tipologia: catena di causa ed effetto <!-- due: 2026-09-12 -->
+
+Mappa e note rispondono a "che forma ha?" e "cosa e' stato detto davvero?".
+Nessuna delle due risponde a "cosa ha portato a cosa?": la mappa appende tutto
+a un centro, quindi una catena di tre cause e il ramo a cui appartiene si
+somigliano, e gli archi che portano la causalita' finiscono come cross-link
+tratteggiati disegnati intorno.
+
+Niente di nuovo nel documento salvato: tre dei quattro tipi di arco gia' dicono
+in che direzione va l'influenza (`causes` e `supports` +, `contrasts` −,
+`relates` nessuna), quindi una mappa salvata mesi fa si apre nella vista senza
+migrazione.
+
+- [x] 8.1 Modello causale: rottura dei cicli, livelli per cammino piu' lungo, ordinamento per baricentro <!-- size: L; done: 2026-09-12 -->
+- [x] 8.2 Anelli di retroazione conservati e etichettati R/B contando i link negativi <!-- size: M; done: 2026-09-12 -->
+- [x] 8.3 Coordinate: una colonna per livello, righe allineate al baricentro di cio' che alimenta il nodo <!-- size: L; done: 2026-09-12 -->
+- [x] 8.4 Vista flow in D3: ruolo sul bordo del box, polarita' sull'arco, badge del loop sull'arco che lo chiude <!-- size: L; done: 2026-09-12 -->
+- [x] 8.5 Terzo pulsante Mappa / Note / Flow, con V che cicla e selezione condivisa fra le tre viste <!-- size: M; done: 2026-09-12 -->
+- [x] 8.6 Didascalia che spiega solo la notazione effettivamente a schermo, e conteggio dei concetti fuori catena <!-- size: S; done: 2026-09-12 -->
+- [x] 8.7 Modo di lettura sul server: prompt causale dietro `mode`, stesso schema e stessa pipeline <!-- size: M; done: 2026-09-12 -->
+- [x] 8.8 Rilettura del transcript per causa ed effetto, che sostituisce la mappa e chiede due volte <!-- size: M; done: 2026-09-12 -->
+- [x] 8.9 Export PNG di cio' che e' a schermo, non sempre della mappa <!-- size: S; done: 2026-09-12 -->
+- [x] 8.10 Test su causal.js e flow-layout.js, piu' i modi di lettura in extract.js <!-- size: M; done: 2026-09-12 -->
+- [ ] 8.11 Filtro della legenda che nasconde un tipo: oggi toglie il nodo ma lascia il buco nella colonna <!-- size: M -->
+- [ ] 8.12 Scena screenshot-kit per la vista flow, con un seed che contiene almeno un anello <!-- size: S -->

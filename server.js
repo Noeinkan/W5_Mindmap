@@ -4,15 +4,53 @@ const express = require("express");
 const path = require("path");
 
 const { loadConfig } = require("./lib/config");
-const { createOllamaClient, UpstreamError } = require("./lib/ollama");
+const { createOllamaClient } = require("./lib/ollama");
+const { createGeminiClient } = require("./lib/gemini");
+const { createAiClient, describeProviders } = require("./lib/provider");
+const { UpstreamError } = require("./lib/upstream");
 const { extractGraph } = require("./lib/extract");
+const { PROMPT_MODES, DEFAULT_MODE } = require("./lib/prompt");
 const { createStore } = require("./lib/store");
 const { createGraphsRouter } = require("./lib/graphs-api");
 const { createIngestRouter } = require("./lib/ingest-api");
 
 const config = loadConfig();
-const client = createOllamaClient(config);
 const store = createStore({ dir: config.graphStoreDir });
+
+/**
+ * The backend for one run, chosen by the switch in the sidebar rather than fixed at
+ * boot. Everything a request needs is in the body, so nothing is remembered between
+ * runs on the server: two browsers can sit on different providers at once.
+ *
+ * A refusal here is the user's choice being impossible (no API key, an unknown
+ * model), not the model failing — hence its own codes, which the routes answer 400
+ * to instead of blaming the upstream with a 502.
+ */
+function clientForRequest(body) {
+  return createAiClient(config, {
+    provider: body && body.provider,
+    model: body && body.model
+  });
+}
+
+const isChoiceError = (err) =>
+  err instanceof UpstreamError &&
+  (err.code === "provider_unavailable" || err.code === "unknown_model");
+
+/**
+ * Which reading of the transcript to run: the mind map, or the chain of cause
+ * and effect the flow view draws.
+ *
+ * Falls back rather than refusing. An unknown mode is a client sending a name
+ * this server has not heard of, and answering that with a 400 would cost the
+ * user a whole run over a spelling; the map they get is the default one, which
+ * is the one they would have got before the modes existed.
+ */
+const modeForRequest = (body) => {
+  const asked = String((body && body.mode) || "").trim();
+  return Object.prototype.hasOwnProperty.call(PROMPT_MODES, asked) ? asked : DEFAULT_MODE;
+};
+
 const app = express();
 
 app.use(express.json({ limit: "2mb" }));
@@ -26,13 +64,32 @@ app.use("/api/graphs", createGraphsRouter({ store }));
 app.use("/api/ingest", createIngestRouter({ config }));
 
 app.get("/api/health", async (req, res) => {
-  const ollama = await client.health();
+  // Both are asked, whichever is selected: the point of the screen is to say which
+  // of the two is usable right now. The Gemini call is free when no key is set —
+  // it answers "not configured" without going anywhere near the network.
+  const [ollama, gemini] = await Promise.all([
+    createOllamaClient(config).health(),
+    createGeminiClient(config).health()
+  ]);
+  const active = config.aiProvider === "gemini" ? gemini : ollama;
   res.json({
     ok: true,
+    provider: config.aiProvider,
     ollama,
+    gemini,
     chunkSize: config.chunkSize,
-    ready: ollama.reachable && ollama.modelAvailable
+    ready: Boolean(active.reachable && active.modelAvailable)
   });
+});
+
+// What the browser needs to draw the model switch: the providers, which of them
+// can be used, and the models to offer for each.
+app.get("/api/providers", async (req, res) => {
+  try {
+    res.json(await describeProviders(config));
+  } catch (err) {
+    sendError(res, 500, "Could not list the available models", String(err), "server_error", createRequestId());
+  }
 });
 
 app.post("/api/extract", async (req, res) => {
@@ -43,8 +100,23 @@ app.post("/api/extract", async (req, res) => {
     return sendError(res, 400, "Transcript is required.", null, "bad_request", requestId);
   }
 
+  let client;
   try {
-    const result = await extractGraph({ transcript, config, client });
+    client = clientForRequest(req.body);
+  } catch (err) {
+    if (isChoiceError(err)) {
+      return sendError(res, 400, err.message, err.details, err.code, requestId);
+    }
+    throw err;
+  }
+
+  try {
+    const result = await extractGraph({
+      transcript,
+      config,
+      client,
+      mode: modeForRequest(req.body)
+    });
     res.json({ ...result, requestId });
   } catch (err) {
     if (err instanceof UpstreamError) {
@@ -95,11 +167,31 @@ app.post("/api/extract/stream", async (req, res) => {
     return res.end();
   }
 
+  // The headers are already out, so an impossible choice travels as an SSE error
+  // rather than a status code: the browser is reading a stream by now, not waiting
+  // on a response.
+  let client;
+  try {
+    client = clientForRequest(req.body);
+  } catch (err) {
+    clearInterval(heartbeat);
+    if (isChoiceError(err)) {
+      sendEvent("error", {
+        error: err.message,
+        details: config.exposeErrorDetails ? err.details : undefined,
+        code: err.code
+      });
+      return res.end();
+    }
+    throw err;
+  }
+
   try {
     const result = await extractGraph({
       transcript,
       config,
       client,
+      mode: modeForRequest(req.body),
       isCancelled: () => cancelled || res.writableEnded,
       onEvent: ({ type, ...data }) => {
         if (!config.exposeErrorDetails) delete data.details;
@@ -149,6 +241,12 @@ if (require.main === module) {
   app.listen(config.port, () => {
     console.log(`Server running on http://localhost:${config.port}`);
     console.log(`Ollama: ${config.ollamaUrl} (model ${config.ollamaModel})`);
+    console.log(
+      config.geminiApiKey
+        ? `Gemini: key loaded (model ${config.geminiModel})`
+        : "Gemini: no GEMINI_API_KEY in .env — the cloud option stays greyed out"
+    );
+    console.log(`Default provider: ${config.aiProvider} (switchable in the sidebar)`);
   });
 }
 

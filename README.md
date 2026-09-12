@@ -1,11 +1,11 @@
 # Transcript Mind Map
 
-Minimal app that uses a local Ollama model to extract a typed mind‑map graph from a transcript and renders it with an editable D3.js force layout. The transcript can be pasted, or read out of a **PDF, EPUB, Markdown or text file** — a document arrives split into its own sections, so a book is mapped a chapter at a time.
+Minimal app that extracts a typed mind‑map graph from a transcript and renders it with an editable D3.js force layout. The reading is done either by a **local Ollama model** or by **Google Gemini**, chosen from a switch in the sidebar. The transcript can be pasted, or read out of a **PDF, EPUB, Markdown or text file** — a document arrives split into its own sections, so a book is mapped a chapter at a time.
 
 ## Requirements
 
-- Node.js 18+
-- Ollama running locally
+- Node.js 20.6+ (for `--env-file-if-exists`, which is how `.env` is read)
+- **Either** Ollama running locally, **or** a Google Gemini API key. Neither is required to open the app and edit a map by hand.
 
 ## Run
 
@@ -15,13 +15,71 @@ Minimal app that uses a local Ollama model to extract a typed mind‑map graph f
    - `npm start`
 3. Open http://localhost:3200
 
-The status line tells you straight away whether Ollama is reachable and whether the configured model is pulled, so you find out before pasting a transcript rather than forty seconds into a generation.
+The status line tells you straight away whether the selected model is reachable, so you find out before pasting a transcript rather than forty seconds into a generation.
+
+## Choosing the model
+
+Above the **Generate mind map** button there are two dropdowns, **AI provider** and
+**Model**. The line underneath them says what the current choice means and, when
+something is missing, exactly what to do about it.
+
+| | Ollama | Google Gemini |
+| --- | --- | --- |
+| Where it runs | On this machine | Google's servers |
+| The transcript | Never leaves the laptop | Is sent to Google |
+| Cost | Free | Per run, billed by Google |
+| Speed | As fast as the graphics card (~17 s per chunk on `gemma3:4b`) | Usually a few seconds per chunk |
+| What it needs | `ollama serve` running and the model pulled | A `GEMINI_API_KEY` in `.env` |
+
+Both read the transcript with the same prompts and answer in the same schema, so a
+map made on one is the same shape as a map made on the other.
+
+The choice is remembered by the browser, per provider — switch to Gemini and back
+and the Ollama model you were on is still selected. It is sent with each run, so
+the server holds no preference of its own and two browsers can sit on different
+providers at the same time.
+
+### Turning Gemini on
+
+1. Get a key at **https://aistudio.google.com/apikey** — sign in, click **Get API
+   key**, then **Create API key**, and copy the string it shows you. It is only
+   shown in full once.
+2. In the project folder, copy `.env.example` to `.env`:
+   - PowerShell: `Copy-Item .env.example .env`
+   - Git Bash: `cp .env.example .env`
+3. Open `.env` and put the key on the `GEMINI_API_KEY=` line, with no quotes and no
+   spaces around the `=`.
+4. **Stop the server and start it again** (`npm start`). The key is read once at
+   startup — until you restart, the Gemini entry stays greyed out.
+5. Reload the page. **Google Gemini** is now selectable in the **AI provider**
+   dropdown, and the line underneath says *API key loaded — ready*.
+
+`.env` is gitignored, so the key is never committed. If the Gemini entry still says
+*no API key* after a restart, check the server window: it prints either
+`Gemini: key loaded` or `Gemini: no GEMINI_API_KEY in .env` on the line after the
+port.
+
+Nothing about the local path changes: with no `.env` at all the app runs on Ollama
+exactly as it did before.
 
 ## Environment
+
+Read from the environment, and from a gitignored `.env` in the project root —
+`npm start` and `npm run dev` load it with `node --env-file-if-exists=.env`. Copy
+`.env.example` to get started. Every value takes effect on the next server start.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3200` | HTTP port |
+| `AI_PROVIDER` | `ollama` | Which backend the switch starts on: `ollama` or `gemini`. A name that is neither falls back to `ollama` rather than failing at boot |
+| `GEMINI_API_KEY` | *(empty)* | Google Gemini key. Empty means the Gemini entry is shown but cannot be picked |
+| `GEMINI_MODEL` | `gemini-3.1-flash-lite` | The model the switch starts on |
+| `GEMINI_MODELS` | `gemini-3.1-flash-lite,gemini-3.5-flash-lite,gemini-3.8-flash,gemini-2.5-flash-lite` | What the Model dropdown offers, cheapest first. The server refuses any id not on this list, so a model released later becomes selectable by editing one line — and a typo cannot reach the API |
+| `GEMINI_FALLBACK_MODELS` | `gemini-3.5-flash-lite,gemini-2.5-flash` | Tried in order when the chosen model answers busy (503/429). A run is one call per chunk, so without this a single busy minute costs every chunk after it |
+| `GEMINI_TIMEOUT_MS` | `120000` | Per-request timeout, i.e. per chunk |
+| `GEMINI_RETRIES` | `1` | Retries on a transport failure |
+| `GEMINI_HEALTH_TIMEOUT_MS` | `5000` | Timeout for the key/model probe |
+| `GEMINI_MAX_OUTPUT_TOKENS` | `8192` | Runaway stop, not a target. Gemini 3 gets 2048 more on top, because it spends part of the same budget thinking before it answers |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
 | `OLLAMA_MODEL` | `gemma3:4b` | Model used for extraction — must be pulled locally (`ollama pull gemma3:4b`) |
 | `OLLAMA_TIMEOUT_MS` | `120000` | Per-request timeout, i.e. per chunk |
@@ -51,7 +109,7 @@ The status line tells you straight away whether Ollama is reachable and whether 
 3. **The prompt carries the concepts found so far**, so the model reuses the exact label `Handover Issues` instead of inventing `Issues with handover`.
 4. **Merging** collapses nodes whose labels match once case, punctuation and a leading article are ignored, then rewrites every edge onto the surviving node ids. Without that rewrite the same concept is drawn once per chunk that mentions it.
 5. **A linking pass** closes the run. Each chunk is extracted alone, so its concepts only ever get edges to concepts from the same chunk and the map still reads as one island per chunk. This pass shows the model the concept list alone — no transcript, so it is short — and asks only for the edges that cross between groups. Edges pointing at ids it made up are dropped.
-6. **Failures are separated.** A chunk the model answered badly is re-asked once with a stricter instruction, then skipped with a warning — the rest of the map survives. A chunk that comes back well-formed but empty is asked once more, then reported as `empty_chunk` rather than as a schema error. A transport failure (Ollama down, timed out) stops the run at once, because every remaining chunk would fail the same way, slowly — but the chunks already done are still returned, as a `partial` map with an `ollama_failed` warning naming the chunk it stopped on.
+6. **Failures are separated.** A chunk the model answered badly is re-asked once with a stricter instruction, then skipped with a warning — the rest of the map survives. A chunk that comes back well-formed but empty is asked once more, then reported as `empty_chunk` rather than as a schema error. A transport failure (Ollama down, timed out) stops the run at once, because every remaining chunk would fail the same way, slowly — but the chunks already done are still returned, as a `partial` map with an `ollama_failed` warning naming the chunk it stopped on. On Gemini there is one more rung before that: a model answering *busy* (HTTP 503 or 429) is not a failure yet — the next model in `GEMINI_FALLBACK_MODELS` is tried for that chunk, and the run carries on.
 7. **A long run is not a hung run.** A 24k-character transcript is seven chunks plus the linking pass: two minutes of model calls with nothing to say in between. The stream sends an SSE heartbeat every 10 s (`SSE_HEARTBEAT_MS`) and the browser watches for *silence*, not for total elapsed time — 45 s without a byte is a stall, anything else is work. A fixed 60 s deadline in the browser used to kill healthy runs mid-way and blame it on Ollama.
 
 Each node carries a `quote`: a verbatim span from the transcript that justifies it. It is the body of the card in the note view, and it is in the exported JSON.
@@ -126,9 +184,16 @@ panel.
 
 ## API
 
-- `GET /api/health` → `{ ok, ready, ollama: { url, model, reachable, modelAvailable, models } }`
-- `POST /api/extract` `{ transcript }` → `{ nodes, edges, warnings, chunks, partial, requestId }`
-- `POST /api/extract/stream` `{ transcript }` → server-sent events: `status` (carries `chunks`, `chunkSize` and the `model` name), `progress` (`chunk`, `total`, `chars`), `retry` (a chunk being re-asked, with the `code` that caused it), `graph` (the full merged graph so far, once per chunk, with the `ms` that chunk took), `warning`, `done` (`chunks`, `warnings`, `partial`, `ms`), `error`
+- `GET /api/health` → `{ ok, ready, provider, ollama: { url, model, reachable, modelAvailable, models }, gemini: { model, configured, reachable, modelAvailable, models } }`. `ready` follows whichever provider is the configured default
+- `GET /api/providers` → `{ active, providers: [{ id, label, hint, available, ready, model, models, note }] }` — what the sidebar switch is drawn from. Ollama's `models` are what is pulled on this machine; Gemini's are `GEMINI_MODELS`, read without calling Google
+- `POST /api/extract` `{ transcript, provider?, model?, mode? }` → `{ nodes, edges, warnings, chunks, partial, requestId }`. Leaving `provider` out uses `AI_PROVIDER`. A choice that cannot work is a `400`, not a `502`: `provider_unavailable` (Gemini with no key) or `unknown_model`, and no model is called
+- `POST /api/extract/stream` `{ transcript, provider?, model?, mode? }` → server-sent events: `status` (carries `chunks`, `chunkSize`, the `mode`, and the `provider` and `model` the run is actually on), `progress` (`chunk`, `total`, `chars`), `retry` (a chunk being re-asked, with the `code` that caused it), `graph` (the full merged graph so far, once per chunk, with the `ms` that chunk took), `warning`, `done` (`chunks`, `warnings`, `partial`, `ms`), `error`
+
+`mode` is which reading to run: `mindmap` (the default) or `causal`, the chain of cause
+and effect the flow view draws. It selects a prompt and nothing else — both answer in the
+same schema, so the chunking, retries, merge, linking pass and saved document are shared.
+A mode the server has not heard of falls back to `mindmap` rather than refusing: a
+spelling should not cost a run that takes minutes.
 - `GET /samples/<file>` → the bundled sample transcripts in `samples/`
 - `POST /api/ingest?name=<filename>` with the file itself as the body (no
   multipart form) → `{ ok, kind, title, text, chars, units, unitLabel, method,
@@ -158,9 +223,12 @@ file is touched.
 server.js          Express app: config, routes, error mapping
 lib/config.js      Environment into one config object
 lib/chunking.js    Line-aware transcript chunking
-lib/prompt.js      The extraction prompt and the linking prompt
+lib/prompt.js      The mind-map prompt, the causal prompt, and the linking prompt
 lib/schema.js      JSON schemas sent to Ollama as `format`
+lib/upstream.js    What both backends share: the error type, retry, and readable fetch failures
 lib/ollama.js      Ollama client: generate, health, retry
+lib/gemini.js      Gemini client, same shape: generate, health, model fallback on 503
+lib/provider.js    Which backend answers a run, and what the browser may choose from
 lib/json-extract.js  Getting JSON out of whatever the model wrapped it in
 lib/graph.js       Node/edge normalisation, sanitising, cross-chunk merging, components
 lib/link.js        The pass that connects concepts from different chunks
@@ -184,20 +252,24 @@ lib/html-text.js   XHTML into prose, and the whitespace rules the rest agrees on
 public/index.html  Markup, icon sprite, canvas overlays
 public/styles.css  Design tokens (light and dark) and every component
 public/notes.css   The note board and its cards
-public/js/main.js        Composition root: both views + controller + state subscription
+public/js/main.js        Composition root: all three views + controller + state subscription
 public/js/state.js       Graph data, selection, filters, current view, undo/redo history
 public/js/graph-doc.js   The saved format and its rules — shared with the server  (pure)
 public/js/session.js     The map as a document, and the localStorage autosave
 public/js/library.js     The saved-maps panel: save, open, rename, delete
 public/js/tree.js        Roots the graph: centre, branches, cross-links   (pure)
 public/js/layout.js      Two-wing positions, children stacked in columns  (pure)
+public/js/causal.js      The graph as cause and effect: layers, loops, polarity  (pure)
+public/js/flow-layout.js Columns and rows for the flow diagram              (pure)
 public/js/geometry.js    Label wrapping and the tapered branch ribbons
 public/js/palette.js     Theme colours, and the branch hues
 public/js/graph.js       D3 map view: nodes, branches, viewport
 public/js/notes.js       Note view: one card per concept, with backlinks
+public/js/flow.js        Flow view: the chain drawn left to right, with the R/B badges
 public/js/controller.js  Every control, gesture and keyboard shortcut
 public/js/ui.js          Panels, inspector, legend, toasts, inline label editor
 public/js/api.js         Fetch + SSE client for the extraction routes, and the file upload
+public/js/model-picker.js The AI provider / model switch, and the browser's memory of it
 public/js/sections.js    The sections panel: the parts of a file that was read
 public/js/log.js         The activity log: every pipeline event, in words
 public/js/exporters.js   JSON and PNG downloads
@@ -205,8 +277,9 @@ public/js/exporters.js   JSON and PNG downloads
 
 `public/js/package.json` holds nothing but `{"type": "module"}`. The browser does not
 need it — those files are loaded as modules either way — but Node does, so
-`test/tree.test.js` and `test/layout.test.js` can import the real layout code instead
-of a copy of it. `lib/document.js` uses the same door for `public/js/graph-doc.js`:
+`test/tree.test.js`, `test/layout.test.js`, `test/causal.test.js` and
+`test/flow-layout.test.js` can import the real layout code instead of a copy of it.
+`lib/document.js` uses the same door for `public/js/graph-doc.js`:
 the rules a saved map has to obey are written once, in the module the browser loads,
 and the server reaches them with a dynamic `import` rather than keeping a second copy
 that would drift.
@@ -217,7 +290,7 @@ that would drift.
 node --test test/*.test.js
 ```
 
-No test dependencies — the built-in `node:test` runner. `test/server.test.js` runs the real Express app against a stub Ollama, so the routes and the SSE stream are covered too; `test/graphs-api.test.js` runs it against a temporary store directory for the saved-map routes. `test/graph-doc.test.js` imports the browser's own document module and checks it agrees with `lib/graph.js`, which is what keeps "the file the app exports" and "the file the server accepts" the same file.
+No test dependencies — the built-in `node:test` runner. `test/server.test.js` runs the real Express app against a stub Ollama, so the routes and the SSE stream are covered too — including that an impossible model choice is refused *before* anything is called; `test/gemini.test.js` and `test/provider.test.js` cover the cloud backend and the switch against a stub `fetch`, so no test ever reaches Google; `test/graphs-api.test.js` runs it against a temporary store directory for the saved-map routes. `test/graph-doc.test.js` imports the browser's own document module and checks it agrees with `lib/graph.js`, which is what keeps "the file the app exports" and "the file the server accepts" the same file.
 
 The readers are tested against real bytes: `test/fixtures.js` writes an actual ZIP,
 EPUB and PDF — object by object, with no cross-reference table, because that is what
@@ -226,11 +299,15 @@ breaks and spaces come from, `test/epub-text.test.js` the archive and the two ki
 of table of contents, `test/sections.test.js` the splitting rules, and
 `test/ingest.test.js` what happens to a file that is not what it says it is.
 
-## The two views
+## The three views
 
-One graph, two readings, switched with **Map** / **Notes** at the top left (or `V`).
-Both stay rendered, so switching is instant and the PNG export always has a laid-out
-map behind it.
+One graph, three readings, switched with **Map** / **Notes** / **Flow** at the top left
+(`V` cycles them). All three stay rendered, so switching is instant and the PNG export
+always has a laid-out canvas behind it.
+
+They answer different questions, and that is the whole reason there are three. The map
+answers *how is this shaped?*, the notes answer *what was actually said?*, and the flow
+answers *what led to what?*
 
 ### Map — a two-wing mind map
 
@@ -307,6 +384,77 @@ text here, not only labels, so a card can be found by what was actually said.
 
 This is the view that answers "did the model make this up?", which a canvas of labels
 cannot.
+
+### Flow — cause and effect
+
+A chain-reaction diagram: causes on the left, effects on the right, every arrow pointing
+the same way. The map deliberately hangs everything off one centre, so a chain of three
+causes and the branch it belongs to look alike there, and the arrows carrying the
+causality end up as dashed cross-links drawn round the outside. Here those arrows are
+the subject.
+
+**Nothing new is saved.** Three of the four edge types already say which way an
+influence runs, so the view is a reading of the map you already have — a map saved
+months ago opens in it with no migration:
+
+| Edge type | Means | Sign |
+| --- | --- | --- |
+| `causes` | A brings about B | + (drawn without a glyph — it is the common case) |
+| `supports` | A strengthens B | **+** |
+| `contrasts` | A works against B | **−** |
+| `relates` | association, no direction of effect | none — drawn faintly, never ranks a node |
+
+The layout is [Sugiyama's](https://en.wikipedia.org/wiki/Layered_graph_drawing), the
+standard way a directed graph is drawn so it can be followed:
+
+1. **Cycles are broken** so that layers can exist at all — but not thrown away. A cycle
+   in a causal graph is a feedback loop, which is the most interesting thing such a
+   diagram can find.
+2. **Every node gets a layer** by longest path from a source. Ranking by the *shortest*
+   path would let an effect sit level with one of its own causes wherever a second,
+   shorter route reached it, and a diagram with an arrow running backwards is one nobody
+   can follow.
+3. **Each layer is ordered** to cut crossings (the barycentre heuristic), with a bend
+   inserted in every layer a long edge passes over so it steers round the boxes in the
+   way instead of cutting across them.
+4. **Rows are nudged** so an effect sits level with the middle of what feeds it. Without
+   that step the arrows are correct and pointlessly diagonal; with it, a straight chain
+   draws a straight line.
+
+Each node is coloured by where it stands rather than by what it is — a **trigger**
+(nothing points at it) is a green pill, an **outcome** (it points at nothing) carries a
+cap on its leading edge, a **link** is neither. The type keeps its own dot, so the legend
+filter still means something.
+
+Feedback loops come back labelled by the convention systems thinkers already read: count
+the negative links going round the loop, an even count means it reinforces itself (**R**),
+an odd count means it balances itself (**B**). Hover a badge to light the whole loop. The
+caption strip under the diagram spells out only the notation actually on screen — a key
+for a notation that is not there is noise, and noise is what stops a legend being read.
+
+Nodes are not draggable here, unlike the map. On the map a dragged node keeps its spot
+because the layout has no opinion about where a branch hangs; here the column *is* the
+claim — "this is three steps downstream of that" — and a node dragged out of it would
+state something the graph does not say.
+
+`test/causal.test.js` covers the model, `test/flow-layout.test.js` the coordinates.
+
+#### Re-reading for cause and effect
+
+Asked for a mind map, the model returns structure, and the arrows carrying causality are
+a by-product — so a map built the usual way is often thin here. **Re-read for cause &
+effect** sends the stored transcript back to the model with a prompt that asks for the
+causality directly: chains rather than stars, `contrasts` rather than `causes` when the
+influence is negative, and feedback named where it exists.
+
+It answers in the same schema as the ordinary reading, so nothing downstream changes —
+the parsing, the merge, the linking pass, the saved file and the export are all shared,
+and the result is an ordinary map you can open in the other two views.
+
+It *replaces* the map rather than adding to it. Merging the two readings sounds kinder
+and is worse: the same concept comes back under two labels and the merge leaves a graph
+that is neither reading. `Ctrl+Z` puts the old map back, and the button asks twice before
+it starts.
 
 ## Keeping a map
 

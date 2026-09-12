@@ -23,9 +23,16 @@ export function exportJson() {
   download(new Blob([payload], { type: "application/json" }), "mindmap.json");
 }
 
-/** Rasterises the live SVG, cropped to the graph bounds, at 2× resolution. */
-export async function exportPng(graph) {
-  const box = graph.bounds();
+/**
+ * Rasterises the live SVG, cropped to the graph bounds, at 2× resolution.
+ *
+ * `view` is whichever canvas is on screen — the map or the flow diagram. Both
+ * answer `bounds()` and `svgNode()` and both draw into a `g.viewport`, which is
+ * the whole contract this needs, so exporting what you are looking at costs
+ * nothing beyond being handed the right one.
+ */
+export async function exportPng(view, filename = "mindmap.png") {
+  const box = view.bounds();
   if (!box) throw new Error("Nothing to export yet");
 
   const padding = 48;
@@ -33,7 +40,7 @@ export async function exportPng(graph) {
   const height = box.y1 - box.y0 + padding * 2;
   const palette = readPalette();
 
-  const clone = graph.svgNode().cloneNode(true);
+  const clone = view.svgNode().cloneNode(true);
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   clone.setAttribute("width", width);
   clone.setAttribute("height", height);
@@ -63,7 +70,7 @@ export async function exportPng(graph) {
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-  download(blob, "mindmap.png");
+  download(blob, filename);
 }
 
 function loadImage(src) {

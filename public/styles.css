@@ -57,6 +57,17 @@
   --node-text: #eaf0fb;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.35);
+
+  /* Flow view. A third scale, kept apart from node type and branch hue for the
+     same reason those two are kept apart from each other: it answers a third
+     question — not what a concept is, nor which part of the map it belongs to,
+     but where it stands in a chain. Warm for a loop that runs away with itself,
+     cool for one that settles. */
+  --r-trigger: #34d399;
+  --r-link: #8494b3;
+  --r-outcome: #818cf8;
+  --l-reinforcing: #fbbf24;
+  --l-balancing: #22d3ee;
 }
 
 /* Light */
@@ -96,6 +107,11 @@
   --b6: #1d4ed8;
   --b7: #4d7c0f;
   --b8: #c2410c;
+  --r-trigger: #047857;
+  --r-link: #64748b;
+  --r-outcome: #4338ca;
+  --l-reinforcing: #b45309;
+  --l-balancing: #0e7490;
   --shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
   --shadow-sm: 0 1px 4px rgba(15, 23, 42, 0.1);
 }
@@ -132,7 +148,11 @@ body {
   display: none;
 }
 
-svg:not(#graph) {
+/* Every svg in the app is an 18px icon except the two that are canvases. Both
+   have to be named here rather than styled past it: `:not(#graph)` takes the
+   specificity of the id inside it, so a rule on the canvas's own class loses to
+   this one and the canvas is drawn 18 pixels wide. */
+svg:not(#graph):not(#flow) {
   width: 18px;
   height: 18px;
   fill: none;
@@ -383,6 +403,26 @@ select {
 .mini-field > span {
   font-size: 11px;
   color: var(--text-dim);
+}
+
+/* The AI provider / model switch above the Generate button. Its note line is a
+   sentence, not a label, so it gets room to wrap rather than the tight spacing
+   the rest of the block uses. */
+.model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-picker .hint-inline {
+  margin: 0;
+  line-height: 1.45;
+}
+
+/* A provider that cannot be used yet — no API key, typically — stays visible and
+   says why, rather than disappearing and leaving nothing to explain. */
+.model-picker option:disabled {
+  color: var(--text-faint);
 }
 
 /* Buttons */
@@ -1037,6 +1077,11 @@ select {
   right: 14px;
 }
 
+.overlay-bl {
+  bottom: 14px;
+  left: 14px;
+}
+
 .toolbar,
 .zoom,
 .overlay-tl .icon-btn,
@@ -1302,6 +1347,158 @@ select {
   gap: 8px;
   margin-top: 8px;
   pointer-events: auto;
+}
+
+/* ============================================================
+   Flow view — the graph as cause and effect
+   ------------------------------------------------------------
+   The diagram itself is drawn inline by public/js/flow.js, so
+   that the PNG export can serialise the live SVG. What is here
+   is the chrome round it: the canvas it sits on, the caption
+   strip carrying the conventions a layered diagram cannot show
+   for itself, and what stands in for it when the map records no
+   influence at all.
+   ============================================================ */
+.flow-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--canvas-bg);
+  cursor: grab;
+}
+
+.flow-canvas[hidden] {
+  display: none;
+}
+
+.flow-bar {
+  z-index: 6;
+  flex-wrap: wrap;
+  gap: 10px;
+  max-width: min(560px, calc(100% - 28px));
+  padding: 8px 12px;
+  font-size: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-sm);
+}
+
+.flow-bar[hidden] {
+  display: none;
+}
+
+.flow-read {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.flow-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.flow-arrow {
+  color: var(--r-outcome);
+  font-weight: 800;
+}
+
+.flow-stat {
+  color: var(--text-dim);
+}
+
+/* The conventions, spelled out: what a sign on an arrow means and what R and B
+   stand for. Only the keys the diagram on screen actually uses are rendered —
+   a legend for a notation that is not there is noise. */
+.flow-keys {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--text-dim);
+}
+
+.flow-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.flow-key b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 3px;
+  font-size: 10.5px;
+  font-weight: 800;
+  border-radius: 999px;
+  border: 1.5px solid currentColor;
+  background: var(--canvas-bg);
+}
+
+.flow-key[data-key="plus"] { color: var(--e-supports); }
+.flow-key[data-key="minus"] { color: var(--e-contrasts); }
+.flow-key[data-key="reinforcing"] { color: var(--l-reinforcing); }
+.flow-key[data-key="balancing"] { color: var(--l-balancing); }
+
+.flow-bar .link-btn {
+  margin-left: auto;
+}
+
+/* A button that has asked its question and is waiting for the second click. */
+.is-arming {
+  color: var(--warn) !important;
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent) !important;
+  background: color-mix(in srgb, var(--warn) 14%, transparent) !important;
+}
+
+.flow-none {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  background: var(--canvas-bg);
+}
+
+.flow-none[hidden] {
+  display: none;
+}
+
+.flow-none h2 {
+  margin: 4px 0 0;
+  font-size: 17px;
+}
+
+.flow-none p {
+  margin: 0;
+  max-width: 420px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.flow-none em {
+  font-style: normal;
+  font-weight: 650;
+  color: var(--text);
 }
 
 /* Inline label editor */

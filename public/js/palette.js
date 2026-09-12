@@ -26,6 +26,18 @@ export function readPalette() {
       supports: read("--e-supports"),
       contrasts: read("--e-contrasts")
     },
+    // The flow view colours a box by where it stands in the chain rather than
+    // by what it is: a third scale, kept apart from the two above for the same
+    // reason they are kept apart from each other — it answers a third question.
+    role: {
+      trigger: read("--r-trigger"),
+      link: read("--r-link"),
+      outcome: read("--r-outcome")
+    },
+    loop: {
+      reinforcing: read("--l-reinforcing"),
+      balancing: read("--l-balancing")
+    },
     branches: BRANCH_VARS.map(read).filter(Boolean),
     nodeBg: read("--node-bg"),
     nodeText: read("--node-text"),
