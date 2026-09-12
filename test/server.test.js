@@ -344,6 +344,38 @@ test("a model named in the request is the one that gets asked", async () => {
   );
 });
 
+test("picking DeepSeek without a key is a 400 that names DEEPSEEK_API_KEY", async () => {
+  let called = false;
+  handleUpstream = () => {
+    called = true;
+    return { body: {} };
+  };
+
+  const response = await fetch(`${baseUrl}/api/extract`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript: TRANSCRIPT, provider: "deepseek" })
+  });
+  const data = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(data.code, "provider_unavailable");
+  assert.match(data.error, /DEEPSEEK_API_KEY/);
+  assert.equal(called, false);
+});
+
+test("health and the provider list both include DeepSeek", async () => {
+  handleUpstream = () => ({ body: { models: [{ name: "test-model:1b" }] } });
+
+  const health = await fetch(`${baseUrl}/api/health`).then((r) => r.json());
+  const list = await fetch(`${baseUrl}/api/providers`).then((r) => r.json());
+  const deepseek = list.providers.find((p) => p.id === "deepseek");
+
+  assert.equal(health.deepseek.configured, false);
+  assert.equal(deepseek.available, false);
+  assert.match(deepseek.note, /DEEPSEEK_API_KEY/);
+});
+
 test("an impossible choice on the streaming route arrives as an error event", async () => {
   const text = await fetch(`${baseUrl}/api/extract/stream`, {
     method: "POST",

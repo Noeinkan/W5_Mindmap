@@ -1,11 +1,11 @@
 # Transcript Mind Map
 
-Minimal app that extracts a typed mind‑map graph from a transcript and renders it with an editable D3.js force layout. The reading is done either by a **local Ollama model** or by **Google Gemini**, chosen from a switch in the sidebar. The transcript can be pasted, or read out of a **PDF, EPUB, Markdown or text file** — a document arrives split into its own sections, so a book is mapped a chapter at a time.
+Minimal app that extracts a typed mind‑map graph from a transcript and renders it with an editable D3.js force layout. The reading is done by a **local Ollama model**, by **Google Gemini** or by **DeepSeek V4.1 Flash**, chosen from a switch in the sidebar. The transcript can be pasted, or read out of a **PDF, EPUB, Markdown or text file** — a document arrives split into its own sections, so a book is mapped a chapter at a time.
 
 ## Requirements
 
 - Node.js 20.6+ (for `--env-file-if-exists`, which is how `.env` is read)
-- **Either** Ollama running locally, **or** a Google Gemini API key. Neither is required to open the app and edit a map by hand.
+- **At least one of** Ollama running locally, a Google Gemini API key, or a DeepSeek API key with credit on the account. None is required to open the app and edit a map by hand.
 
 ## Run
 
@@ -23,13 +23,19 @@ Above the **Generate mind map** button there are two dropdowns, **AI provider** 
 **Model**. The line underneath them says what the current choice means and, when
 something is missing, exactly what to do about it.
 
-| | Ollama | Google Gemini |
-| --- | --- | --- |
-| Where it runs | On this machine | Google's servers |
-| The transcript | Never leaves the laptop | Is sent to Google |
-| Cost | Free | Per run, billed by Google |
-| Speed | As fast as the graphics card (~17 s per chunk on `gemma3:4b`) | Usually a few seconds per chunk |
-| What it needs | `ollama serve` running and the model pulled | A `GEMINI_API_KEY` in `.env` |
+| | Ollama | Google Gemini | DeepSeek |
+| --- | --- | --- | --- |
+| Where it runs | On this machine | Google's servers | DeepSeek's servers |
+| The transcript | Never leaves the laptop | Is sent to Google | Is sent to DeepSeek, whose privacy policy says API data is processed and stored in China |
+| Cost | Free | Per run, billed by Google | Per run, from prepaid credit. The cheapest cloud option; half price outside DeepSeek's peak hours |
+| Speed | As fast as the graphics card (~17 s per chunk on `gemma3:4b`) | Usually a few seconds per chunk | Usually a few seconds per chunk |
+| What it needs | `ollama serve` running and the model pulled | A `GEMINI_API_KEY` in `.env` | A `DEEPSEEK_API_KEY` in `.env`, and credit on the account |
+| Answer shape | Enforced by a schema | Enforced by a schema | Asked for in the prompt; anything off-shape is dropped when the map is built |
+
+The last row is the one real difference in quality control. DeepSeek's JSON mode
+guarantees valid JSON but takes no schema, so a node with an invented type or an
+edge to a concept that does not exist can come back — and is removed by the same
+sanitising step every answer goes through, rather than prevented at the source.
 
 Both read the transcript with the same prompts and answer in the same schema, so a
 map made on one is the same shape as a map made on the other.
@@ -59,6 +65,25 @@ providers at the same time.
 `Gemini: key loaded` or `Gemini: no GEMINI_API_KEY in .env` on the line after the
 port.
 
+### Turning DeepSeek on
+
+1. **Add credit first.** DeepSeek is prepaid: a key on an account with no balance
+   fails every run. Sign in at **https://platform.deepseek.com**, open **Top up**
+   in the left menu, and add a small amount.
+2. On the same site open **API keys**, click **Create new API key**, give it a
+   name, and copy the key it shows you. It is only shown once.
+3. Open `.env` in the project folder. If it does not have a `DEEPSEEK_API_KEY=`
+   line, copy the DeepSeek section from `.env.example` into it.
+4. Replace `your-deepseek-api-key-here` with the key — no quotes, no spaces around
+   the `=`.
+5. **Stop the server and start it again** (`npm start`). The server window should
+   print `DeepSeek: key loaded (model deepseek-flash)`.
+6. Reload the page. **DeepSeek — in the cloud** is now selectable, with
+   `deepseek-flash` (V4.1 Flash) selected in **Model**.
+
+If a run fails with *the DeepSeek account has no balance left*, step 1 did not
+take — the key is fine, the account is empty.
+
 Nothing about the local path changes: with no `.env` at all the app runs on Ollama
 exactly as it did before.
 
@@ -80,6 +105,14 @@ Read from the environment, and from a gitignored `.env` in the project root —
 | `GEMINI_RETRIES` | `1` | Retries on a transport failure |
 | `GEMINI_HEALTH_TIMEOUT_MS` | `5000` | Timeout for the key/model probe |
 | `GEMINI_MAX_OUTPUT_TOKENS` | `8192` | Runaway stop, not a target. Gemini 3 gets 2048 more on top, because it spends part of the same budget thinking before it answers |
+| `DEEPSEEK_API_KEY` | *(empty)* | DeepSeek key. Empty, or the `.env` placeholder, means the DeepSeek entry is shown but cannot be picked |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | The model the switch starts on. `deepseek-flash` is DeepSeek-V4.1-Flash |
+| `DEEPSEEK_MODELS` | `deepseek-flash,deepseek-v4-pro` | What the Model dropdown offers. Same rule as Gemini: ids not on the list are refused |
+| `DEEPSEEK_FALLBACK_MODELS` | *(empty)* | Models to move to when the chosen one is busy. Empty on purpose: the only other model costs three to four times as much, and a busy minute should not quietly move a book onto it |
+| `DEEPSEEK_URL` | `https://api.deepseek.com` | API base URL; only worth changing for a proxy |
+| `DEEPSEEK_TIMEOUT_MS` | `120000` | Per-request timeout, i.e. per chunk |
+| `DEEPSEEK_RETRIES` | `1` | Retries on a transport failure |
+| `DEEPSEEK_MAX_OUTPUT_TOKENS` | `8192` | Runaway stop. Thinking is switched off for extraction, so all of it goes to the answer |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
 | `OLLAMA_MODEL` | `gemma3:4b` | Model used for extraction — must be pulled locally (`ollama pull gemma3:4b`) |
 | `OLLAMA_TIMEOUT_MS` | `120000` | Per-request timeout, i.e. per chunk |
@@ -184,7 +217,7 @@ panel.
 
 ## API
 
-- `GET /api/health` → `{ ok, ready, provider, ollama: { url, model, reachable, modelAvailable, models }, gemini: { model, configured, reachable, modelAvailable, models } }`. `ready` follows whichever provider is the configured default
+- `GET /api/health` → `{ ok, ready, provider, ollama: { url, model, reachable, modelAvailable, models }, gemini: { model, configured, reachable, modelAvailable, models }, deepseek: { …same fields } }`. `ready` follows whichever provider is the configured default
 - `GET /api/providers` → `{ active, providers: [{ id, label, hint, available, ready, model, models, note }] }` — what the sidebar switch is drawn from. Ollama's `models` are what is pulled on this machine; Gemini's are `GEMINI_MODELS`, read without calling Google
 - `POST /api/extract` `{ transcript, provider?, model?, mode? }` → `{ nodes, edges, warnings, chunks, partial, requestId }`. Leaving `provider` out uses `AI_PROVIDER`. A choice that cannot work is a `400`, not a `502`: `provider_unavailable` (Gemini with no key) or `unknown_model`, and no model is called
 - `POST /api/extract/stream` `{ transcript, provider?, model?, mode? }` → server-sent events: `status` (carries `chunks`, `chunkSize`, the `mode`, and the `provider` and `model` the run is actually on), `progress` (`chunk`, `total`, `chars`), `retry` (a chunk being re-asked, with the `code` that caused it), `graph` (the full merged graph so far, once per chunk, with the `ms` that chunk took), `warning`, `done` (`chunks`, `warnings`, `partial`, `ms`), `error`
@@ -228,6 +261,7 @@ lib/schema.js      JSON schemas sent to Ollama as `format`
 lib/upstream.js    What both backends share: the error type, retry, and readable fetch failures
 lib/ollama.js      Ollama client: generate, health, retry
 lib/gemini.js      Gemini client, same shape: generate, health, model fallback on 503
+lib/deepseek.js    DeepSeek client, same shape: JSON mode, thinking off, readable 401/402
 lib/provider.js    Which backend answers a run, and what the browser may choose from
 lib/json-extract.js  Getting JSON out of whatever the model wrapped it in
 lib/graph.js       Node/edge normalisation, sanitising, cross-chunk merging, components
@@ -291,7 +325,7 @@ that would drift.
 node --test test/*.test.js
 ```
 
-No test dependencies — the built-in `node:test` runner. `test/server.test.js` runs the real Express app against a stub Ollama, so the routes and the SSE stream are covered too — including that an impossible model choice is refused *before* anything is called; `test/gemini.test.js` and `test/provider.test.js` cover the cloud backend and the switch against a stub `fetch`, so no test ever reaches Google; `test/graphs-api.test.js` runs it against a temporary store directory for the saved-map routes. `test/graph-doc.test.js` imports the browser's own document module and checks it agrees with `lib/graph.js`, which is what keeps "the file the app exports" and "the file the server accepts" the same file.
+No test dependencies — the built-in `node:test` runner. `test/server.test.js` runs the real Express app against a stub Ollama, so the routes and the SSE stream are covered too — including that an impossible model choice is refused *before* anything is called; `test/gemini.test.js`, `test/deepseek.test.js` and `test/provider.test.js` cover the cloud backends and the switch against a stub `fetch`, so no test ever reaches Google or DeepSeek; `test/graphs-api.test.js` runs it against a temporary store directory for the saved-map routes. `test/graph-doc.test.js` imports the browser's own document module and checks it agrees with `lib/graph.js`, which is what keeps "the file the app exports" and "the file the server accepts" the same file.
 
 The readers are tested against real bytes: `test/fixtures.js` writes an actual ZIP,
 EPUB and PDF — object by object, with no cross-reference table, because that is what

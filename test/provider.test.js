@@ -123,6 +123,50 @@ test("choosing Gemini with no key says which setting is missing", () => {
   );
 });
 
+test("choosing DeepSeek gives a DeepSeek client on V4.1 Flash by default", () => {
+  const config = loadConfig({ DEEPSEEK_API_KEY: "sk-test" });
+
+  const client = createAiClient(config, { provider: "deepseek" }, neverCalled);
+
+  assert.equal(client.provider, "deepseek");
+  assert.equal(client.model, "deepseek-flash");
+});
+
+test("DeepSeek's Pro model can be picked, anything else cannot", () => {
+  const config = loadConfig({ DEEPSEEK_API_KEY: "sk-test" });
+
+  assert.equal(
+    createAiClient(config, { provider: "deepseek", model: "deepseek-v4-pro" }, neverCalled).model,
+    "deepseek-v4-pro"
+  );
+  assert.throws(
+    () => createAiClient(config, { provider: "deepseek", model: "deepseek-r1" }, neverCalled),
+    (err) => err.code === "unknown_model" && /DeepSeek/.test(err.message)
+  );
+});
+
+test("a Gemini model is not accepted for DeepSeek — each provider has its own list", () => {
+  const config = loadConfig({ DEEPSEEK_API_KEY: "sk-test", GEMINI_API_KEY: "g-test" });
+
+  assert.throws(
+    () => createAiClient(config, { provider: "deepseek", model: "gemini-3.1-flash-lite" }, neverCalled),
+    (err) => err.code === "unknown_model"
+  );
+});
+
+test("DeepSeek with no key — or the .env placeholder — names DEEPSEEK_API_KEY", () => {
+  for (const key of ["", "your-deepseek-api-key-here"]) {
+    assert.throws(
+      () => createAiClient(loadConfig({ DEEPSEEK_API_KEY: key }), { provider: "deepseek" }, neverCalled),
+      (err) => err.code === "provider_unavailable" && /DEEPSEEK_API_KEY/.test(err.message)
+    );
+  }
+});
+
+test("AI_PROVIDER=deepseek is accepted as a default", () => {
+  assert.equal(loadConfig({ AI_PROVIDER: "deepseek" }).aiProvider, "deepseek");
+});
+
 test("an Ollama model is taken as given — what is pulled is the machine's business", () => {
   assert.equal(
     createAiClient(withKey, { provider: "ollama", model: "qwen2.5:7b" }, neverCalled).model,
@@ -173,6 +217,51 @@ test("a model that is configured but not pulled still appears, so the dropdown i
   assert.deepEqual(ollama.models, ["gemma3:4b", "qwen2.5:7b"]);
   assert.equal(ollama.ready, false);
   assert.match(ollama.note, /ollama pull gemma3:4b/);
+});
+
+test("the switch offers the three providers, local first", async () => {
+  const data = await describeProviders(keyless, async () => jsonResponse({ models: [] }));
+
+  assert.deepEqual(data.providers.map((p) => p.id), ["ollama", "gemini", "deepseek"]);
+});
+
+test("DeepSeek is listed with its two models, and says where the transcript goes", async () => {
+  const config = loadConfig({ DEEPSEEK_API_KEY: "sk-test" });
+  const data = await describeProviders(config, async () => jsonResponse({ models: [] }));
+  const deepseek = data.providers.find((p) => p.id === "deepseek");
+
+  assert.equal(deepseek.available, true);
+  assert.deepEqual(deepseek.models, ["deepseek-flash", "deepseek-v4-pro"]);
+  assert.match(deepseek.hint, /China/);
+});
+
+test("the dropdown names V4.1 Flash, since its id alone does not say which version it is", async () => {
+  const config = loadConfig({ DEEPSEEK_API_KEY: "sk-test", GEMINI_API_KEY: "g-test" });
+  const data = await describeProviders(config, async () => jsonResponse({ models: [] }));
+  const byId = Object.fromEntries(data.providers.map((p) => [p.id, p]));
+
+  assert.equal(byId.deepseek.modelLabels["deepseek-flash"], "DeepSeek V4.1 Flash");
+  assert.equal(byId.deepseek.modelLabels["deepseek-v4-pro"], "DeepSeek V4 Pro");
+  assert.equal(byId.gemini.modelLabels["gemini-3.1-flash-lite"], "Gemini 3.1 Flash-Lite");
+});
+
+test("a model added through .env with no known name is shown by its id", async () => {
+  const config = loadConfig({ DEEPSEEK_API_KEY: "sk-test", DEEPSEEK_MODELS: "deepseek-flash,deepseek-v5-flash" });
+  const data = await describeProviders(config, async () => jsonResponse({ models: [] }));
+  const deepseek = data.providers.find((p) => p.id === "deepseek");
+
+  assert.equal(deepseek.modelLabels["deepseek-v5-flash"], "deepseek-v5-flash");
+});
+
+test("listing never calls DeepSeek either", async () => {
+  const urls = [];
+  const config = loadConfig({ DEEPSEEK_API_KEY: "sk-test", GEMINI_API_KEY: "g-test" });
+  await describeProviders(config, async (url) => {
+    urls.push(String(url));
+    return jsonResponse({ models: [] });
+  });
+
+  assert.equal(urls.length, 1, "only Ollama should have been asked");
 });
 
 test("no key means Gemini is listed, greyed out, with the fix in the note", async () => {

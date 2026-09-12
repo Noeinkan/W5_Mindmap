@@ -198,26 +198,24 @@ test("a rejected request is reported, not retried on another model", async () =>
   assert.equal(calls, 1);
 });
 
-test("an answer cut off mid-JSON says so, rather than failing as bad JSON", async () => {
+test("an empty answer is returned, not thrown — so it costs one chunk, not the run", async () => {
   const client = createGeminiClient(config, async () =>
     jsonResponse({ candidates: [{ content: { parts: [] }, finishReason: "MAX_TOKENS" }] })
   );
 
-  await assert.rejects(
-    () => client.generate("hi"),
-    (err) => err.code === "gemini_empty" && /MAX_TOKENS/.test(err.details)
-  );
+  const result = await client.generate("hi");
+
+  assert.equal(result.response, "");
+  // The reason travels with it, so the chunk's warning can say why.
+  assert.match(result.empty, /MAX_TOKENS/);
 });
 
-test("a blocked prompt names the block rather than reporting an empty model", async () => {
+test("a blocked prompt names the block in the empty answer's reason", async () => {
   const client = createGeminiClient(config, async () =>
     jsonResponse({ candidates: [{ content: { parts: [] } }], promptFeedback: { blockReason: "SAFETY" } })
   );
 
-  await assert.rejects(
-    () => client.generate("hi"),
-    (err) => err.code === "gemini_empty" && /SAFETY/.test(err.details)
-  );
+  assert.match((await client.generate("hi")).empty, /SAFETY/);
 });
 
 test("without a key nothing is sent anywhere, and the message says what to do", async () => {

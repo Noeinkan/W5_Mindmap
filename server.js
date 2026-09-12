@@ -6,6 +6,7 @@ const path = require("path");
 const { loadConfig } = require("./lib/config");
 const { createOllamaClient } = require("./lib/ollama");
 const { createGeminiClient } = require("./lib/gemini");
+const { createDeepSeekClient } = require("./lib/deepseek");
 const { createAiClient, describeProviders } = require("./lib/provider");
 const { UpstreamError } = require("./lib/upstream");
 const { extractGraph } = require("./lib/extract");
@@ -67,16 +68,18 @@ app.get("/api/health", async (req, res) => {
   // Both are asked, whichever is selected: the point of the screen is to say which
   // of the two is usable right now. The Gemini call is free when no key is set —
   // it answers "not configured" without going anywhere near the network.
-  const [ollama, gemini] = await Promise.all([
+  const [ollama, gemini, deepseek] = await Promise.all([
     createOllamaClient(config).health(),
-    createGeminiClient(config).health()
+    createGeminiClient(config).health(),
+    createDeepSeekClient(config).health()
   ]);
-  const active = config.aiProvider === "gemini" ? gemini : ollama;
+  const active = { ollama, gemini, deepseek }[config.aiProvider] || ollama;
   res.json({
     ok: true,
     provider: config.aiProvider,
     ollama,
     gemini,
+    deepseek,
     chunkSize: config.chunkSize,
     ready: Boolean(active.reachable && active.modelAvailable)
   });
@@ -244,7 +247,12 @@ if (require.main === module) {
     console.log(
       config.geminiApiKey
         ? `Gemini: key loaded (model ${config.geminiModel})`
-        : "Gemini: no GEMINI_API_KEY in .env — the cloud option stays greyed out"
+        : "Gemini: no GEMINI_API_KEY in .env — the option stays greyed out"
+    );
+    console.log(
+      config.deepseekApiKey
+        ? `DeepSeek: key loaded (model ${config.deepseekModel})`
+        : "DeepSeek: no DEEPSEEK_API_KEY in .env — the option stays greyed out"
     );
     console.log(`Default provider: ${config.aiProvider} (switchable in the sidebar)`);
   });

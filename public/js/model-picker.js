@@ -110,7 +110,11 @@ function renderProviders() {
 function renderModels() {
   const provider = providerById(el.aiProvider.value);
   if (!provider) return;
-  el.aiModel.replaceChildren(...provider.models.map((name) => option(name, name)));
+  // The value stays the id the server needs; the text is the model's own name
+  // where the server knows one ("DeepSeek V4.1 Flash" for `deepseek-flash`).
+  el.aiModel.replaceChildren(
+    ...provider.models.map((id) => option(id, modelLabel(provider, id)))
+  );
   el.aiModel.value = modelFor(provider.id);
   el.aiModel.disabled = !provider.available || provider.models.length < 2;
   el.modelNote.textContent = `${provider.hint} ${provider.note}`.trim();
@@ -180,11 +184,22 @@ export function currentChoice() {
   return { provider: el.aiProvider.value, model: el.aiModel.value };
 }
 
-/** A phrase for the log and the status line: "Gemini (gemini-3.1-flash-lite)". */
+/** The name to show for a model id: the server's label if it sent one, else the id. */
+function modelLabel(provider, id) {
+  return (provider && provider.modelLabels && provider.modelLabels[id]) || id;
+}
+
+/**
+ * A phrase for the status line: "DeepSeek V4.1 Flash" where the model has a name
+ * of its own — it already says whose it is — and "Ollama (gemma3:4b)" where the
+ * id is all there is.
+ */
 export function describeChoice() {
   const { provider, model } = currentChoice();
   if (!provider) return "";
   const known = providerById(provider);
+  const label = modelLabel(known, model);
+  if (model && label !== model) return label;
   const name = known ? known.label.split("—")[0].trim() : provider;
   return model ? `${name} (${model})` : name;
 }
