@@ -739,6 +739,15 @@ export function connectController(graph, notes, flow) {
   el.zoomIn.addEventListener("click", () => canvas().zoomIn());
   el.zoomOut.addEventListener("click", () => canvas().zoomOut());
   el.zoomFit.addEventListener("click", () => canvas().fit());
+  el.rearrange.addEventListener("click", rearrange);
+
+  /** Hands every hand-placed node back to the layout, and fits the result. */
+  function rearrange() {
+    const pinned = unpinAll();
+    graph.render();
+    graph.fitWhenSettled();
+    toast(pinned ? `Layout redrawn — ${pinned} node${pinned > 1 ? "s" : ""} released` : "Layout redrawn");
+  }
 
   el.flowEmptyBack.addEventListener("click", () => showView("map"));
 
@@ -896,14 +905,9 @@ export function connectController(graph, notes, flow) {
         // the buttons tell the same story about what comes next.
         showView(VIEWS[(VIEWS.indexOf(state.view) + 1) % VIEWS.length]);
         break;
-      case "r": {
-        // Hands every hand-placed node back to the radial layout.
-        const pinned = unpinAll();
-        graph.render();
-        graph.fitWhenSettled();
-        toast(pinned ? `Layout redrawn — ${pinned} node${pinned > 1 ? "s" : ""} released` : "Layout redrawn");
+      case "r":
+        rearrange();
         break;
-      }
       case "l":
         // Shift+L throws the log over the canvas, where long lines fit.
         if (event.shiftKey) toggleExpanded();

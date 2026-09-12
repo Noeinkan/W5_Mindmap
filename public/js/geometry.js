@@ -50,47 +50,6 @@ function ellipsise(line, maxWidth) {
   return text;
 }
 
-/** Point where the segment towards (tx, ty) leaves a node's box. */
-export function borderPoint(node, tx, ty, pad = 0) {
-  const dx = tx - node.x;
-  const dy = ty - node.y;
-  if (!dx && !dy) return { x: node.x, y: node.y };
-  const hw = node.w / 2 + pad;
-  const hh = node.h / 2 + pad;
-  const scale = Math.min(dx ? hw / Math.abs(dx) : Infinity, dy ? hh / Math.abs(dy) : Infinity);
-  return { x: node.x + dx * scale, y: node.y + dy * scale };
-}
-
-/**
- * Control points for a branch running out to a wing. The curve leaves the
- * parent sideways and arrives at the child sideways, so a branch and its
- * children read as one stroke of a pen rather than as a corner.
- *
- * A folded chain link sits almost underneath its parent and shares its leading
- * edge, so the sideways stroke has nowhere to bend. It runs straight down just
- * inside that shared edge instead — the rail an indented list already draws,
- * and the edge the bullets are on, so a chain reads as the list it is. Bending
- * it through the middle instead put a hook under every label in the column.
- */
-const RAIL_INSET = 10;
-
-export function branchControls(from, to) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  if (Math.abs(dx) < Math.abs(dy) * 0.5) {
-    const side = from.side || Math.sign(dx) || 1;
-    const rail = from.x - side * (from.w / 2 - RAIL_INSET);
-    return [
-      { x: rail, y: from.y + dy * 0.55 },
-      { x: rail, y: to.y }
-    ];
-  }
-  return [
-    { x: from.x + dx * 0.5, y: from.y },
-    { x: to.x - dx * 0.5, y: to.y }
-  ];
-}
-
 /** A cubic Bézier as a plain path — used for the thin cross-links. */
 export function curvePath(p0, c1, c2, p3) {
   return `M${round(p0.x)},${round(p0.y)} C${round(c1.x)},${round(c1.y)} ${round(c2.x)},${round(

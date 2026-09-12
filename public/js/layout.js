@@ -10,12 +10,12 @@
  * nothing: on the graph the change is a fill of 26% against 9%, and no two
  * labels landing on top of each other.
  *
- * A chain of only children folds into a column instead of claiming a column
- * each, because the width is what decides how far the map has to shrink to fit,
- * and a chain five deep spends five columns to say what one column and five
- * rows say just as well. One column, not a staircase: the indent is spent once
- * where the chain leaves its head, so a chain reads the way every other set of
- * children on the map already reads.
+ * A chain of only children folds downward instead of claiming a column each,
+ * because a chain five deep spends five columns to say what five rows say just
+ * as well. It folds on a 45° diagonal, not straight down: every link slides out
+ * by exactly as much as it drops. Straight down, a chain ten deep became a wall
+ * ten rows tall that made no progress away from the centre, so depth stopped
+ * showing at all and the map came out taller than it was wide.
  *
  * Pure: no DOM, no d3. Sizes come in through `sizeOf`. `test/layout.test.js`
  * covers it.
@@ -23,14 +23,13 @@
 
 const GAP_X = 34; // clear space between a node and the column of its children
 const GAP_Y = 12; // clear space between two labels stacked in the same column
-const INDENT = 26; // how far a folded only child slides out from its parent
 
 /**
  * @param {ReturnType<import("./tree.js").buildTree>} tree
- * @param {{sizeOf:(id:string)=>{w:number,h:number}, gapX?:number, gapY?:number, indent?:number}} options
+ * @param {{sizeOf:(id:string)=>{w:number,h:number}, gapX?:number, gapY?:number}} options
  * @returns {Map<string, {x:number,y:number,side:number}>}
  */
-export function wingLayout(tree, { sizeOf, gapX = GAP_X, gapY = GAP_Y, indent = INDENT }) {
+export function wingLayout(tree, { sizeOf, gapX = GAP_X, gapY = GAP_Y }) {
   const placed = new Map();
   if (!tree) return placed;
 
@@ -53,15 +52,12 @@ export function wingLayout(tree, { sizeOf, gapX = GAP_X, gapY = GAP_Y, indent = 
     // Matching middles instead leaves a column with a ragged margin, which
     // reads as if the labels had been dropped rather than placed.
     //
-    // The indent is spent once, when the chain leaves its head; every link
-    // after that keeps the column. Charging it per link instead turned a chain
-    // into a staircase drifting away from the branch it belongs to, and a
-    // staircase is the one shape on this map you cannot follow — the children
-    // of a node read as a column everywhere else, so a chain has to as well.
+    // A link's shared edge moves out by the same distance its row moved down,
+    // which is what keeps the diagonal at 45° whatever height the labels are.
     const pw = size.get(parent).w;
     const cw = size.get(id).w;
     const step = folds(parent)
-      ? (cw - pw) / 2 + (isLink(parent) ? 0 : indent)
+      ? (cw - pw) / 2 + (y.get(id) - y.get(parent))
       : pw / 2 + gapX + cw / 2;
     x.set(id, x.get(parent) + side.get(id) * step);
   });

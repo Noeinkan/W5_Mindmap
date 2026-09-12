@@ -22,7 +22,8 @@
 import { state, neighboursOf, isVisible, matchesQuery } from "./state.js";
 import { buildTree, collapseTree, SYNTHETIC_ROOT } from "./tree.js";
 import { wingLayout } from "./layout.js";
-import { wrapLabel, borderPoint, branchControls, curvePath, ribbonPath } from "./geometry.js";
+import { wrapLabel, curvePath, ribbonPath } from "./geometry.js";
+import { borderPoint, branchCurve } from "./routing.js";
 import { readPalette, branchColour, fade } from "./palette.js";
 
 /** Font, label width and padding per level — the centre shouts, the leaves talk. */
@@ -414,9 +415,7 @@ export function createGraph(svgEl, handlers = {}) {
       const from = byId.get(d.from);
       const to = byId.get(d.to);
       if (!from || !to || !Number.isFinite(from.x) || !Number.isFinite(to.x)) return "";
-      const [c1, c2] = branchControls(from, to);
-      const start = borderPoint(from, c1.x, c1.y, 0);
-      const end = borderPoint(to, c2.x, c2.y, 1);
+      const { start, c1, c2, end } = branchCurve(from, to);
       const depth = visuals.get(d.from)?.depth ?? 0;
       const width = Math.max(3, 12 - depth * 3.2);
       return ribbonPath(start, c1, c2, end, width, Math.max(2, width * 0.42));

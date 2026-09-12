@@ -52,6 +52,20 @@ test("AI_PROVIDER=gemini makes the cloud the default a request inherits", () => 
   assert.equal(createAiClient(config, {}, neverCalled).provider, "gemini");
 });
 
+test("the placeholder .env ships with counts as no key, so Gemini stays greyed out", () => {
+  const config = loadConfig({ GEMINI_API_KEY: "your-gemini-api-key-here" });
+
+  assert.equal(config.geminiApiKey, "");
+  assert.throws(
+    () => createAiClient(config, { provider: "gemini" }, neverCalled),
+    (err) => err.code === "provider_unavailable"
+  );
+});
+
+test("a real key next to the placeholder rules is kept as it is", () => {
+  assert.equal(loadConfig({ GEMINI_API_KEY: "  AIzaSyExample123  " }).geminiApiKey, "AIzaSyExample123");
+});
+
 test("a misspelt AI_PROVIDER starts on the local model rather than failing at boot", () => {
   assert.equal(loadConfig({ AI_PROVIDER: "geminni" }).aiProvider, "ollama");
 });

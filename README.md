@@ -262,6 +262,7 @@ public/js/layout.js      Two-wing positions, children stacked in columns  (pure)
 public/js/causal.js      The graph as cause and effect: layers, loops, polarity  (pure)
 public/js/flow-layout.js Columns and rows for the flow diagram              (pure)
 public/js/geometry.js    Label wrapping and the tapered branch ribbons
+public/js/routing.js     Which sides a branch leaves and enters by          (pure)
 public/js/palette.js     Theme colours, and the branch hues
 public/js/graph.js       D3 map view: nodes, branches, viewport
 public/js/notes.js       Note view: one card per concept, with backlinks
@@ -277,7 +278,7 @@ public/js/exporters.js   JSON and PNG downloads
 
 `public/js/package.json` holds nothing but `{"type": "module"}`. The browser does not
 need it — those files are loaded as modules either way — but Node does, so
-`test/tree.test.js`, `test/layout.test.js`, `test/causal.test.js` and
+`test/tree.test.js`, `test/layout.test.js`, `test/routing.test.js`, `test/causal.test.js` and
 `test/flow-layout.test.js` can import the real layout code instead of a copy of it.
 `lib/document.js` uses the same door for `public/js/graph-doc.js`:
 the rules a saved map has to obey are written once, in the module the browser loads,
@@ -329,13 +330,17 @@ builds the tree first:
    produces is rarely even, and a branch carrying half the transcript would otherwise
    leave the map hanging off one edge of the screen. Inside a branch the children
    stack downward in a column.
-4. **A chain of only children folds into a column** rather than claiming a column per
-   link. Width is what decides how far the map has to shrink to fit on screen, and a
-   chain five deep spends five columns saying what one column and five rows say just as
-   well. The indent is spent once, where the chain leaves its head; every link after it
-   keeps the column, lines up on the same leading edge, and is joined to the one above
-   by a short hook on that edge. Charging the indent per link instead drew a staircase
-   drifting away from its own branch — the one shape on the map you cannot follow.
+4. **A chain of only children folds down a 45° diagonal** rather than claiming a column
+   per link: every link slides out by exactly as much as it drops, and is joined to the
+   one above by an elbow from under that label's bullet. A chain five deep spends five
+   columns saying what five rows say just as well — but folded straight down, a chain
+   ten deep became a wall ten rows tall that made no progress away from the centre, and
+   the map came out taller than it was wide.
+5. **Branches pick their own attachment sides** from where the two labels actually sit,
+   redrawn every frame (`public/js/routing.js`). Out beyond the parent, a branch is a
+   sideways S across the gap; below or above it, an elbow; behind it, an S out of the
+   back edge. A branch only ever runs through the space between its two labels, so
+   dragging a node never leaves a branch cutting back across the text.
 
 A ring per level came before this and could not be made dense. Labels are wide and
 short, and a ring only grows with its radius while the disc it encloses grows with the

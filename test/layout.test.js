@@ -79,17 +79,30 @@ test("a child sits further out than its parent, on its parent's side", async () 
   });
 });
 
-test("a chain of only children folds downward instead of taking a column each", async () => {
+test("a chain of only children folds down a 45° diagonal", async () => {
   const { wingLayout } = await load("layout.js");
   const placed = wingLayout(await chainTree(), { sizeOf });
 
-  const column = Math.abs(placed.get("a").x - placed.get("r").x);
-  // Every link after the first slides sideways by an indent, not by a whole
-  // column: the width is what decides how far the map shrinks to fit.
-  assert.ok(Math.abs(placed.get("b").x - placed.get("a").x) < column / 2);
-  assert.ok(Math.abs(placed.get("c").x - placed.get("b").x) < column / 2);
-  assert.ok(placed.get("c").y > placed.get("b").y);
-  assert.ok(placed.get("b").y > placed.get("a").y);
+  [["a", "b"], ["b", "c"]].forEach(([parent, child]) => {
+    const p = placed.get(parent);
+    const q = placed.get(child);
+    assert.ok(q.y > p.y, `${child} sits below ${parent}`);
+    // Equal widths here, so the shared edge and the middle move together.
+    assert.equal(Math.abs(q.x - p.x), q.y - p.y, `${child} steps out as far as it steps down`);
+  });
+});
+
+test("the diagonal holds when the labels differ in size", async () => {
+  const { wingLayout } = await load("layout.js");
+  const sizes = { r: { w: 200, h: 50 }, a: { w: 240, h: 60 }, b: { w: 90, h: 30 }, c: { w: 170, h: 44 } };
+  const placed = wingLayout(await chainTree(), { sizeOf: (id) => sizes[id] });
+
+  [["a", "b"], ["b", "c"]].forEach(([parent, child]) => {
+    const p = placed.get(parent);
+    const q = placed.get(child);
+    const edge = (spot, id) => spot.x - spot.side * (sizes[id].w / 2);
+    assert.equal(Math.abs(edge(q, child) - edge(p, parent)), q.y - p.y, `${child} keeps the 45° edge`);
+  });
 });
 
 test("no two labels overlap", async () => {

@@ -145,6 +145,8 @@ function syncView() {
   // Zoom and fit belong to a canvas; the note board scrolls instead. The flow
   // view is a canvas like the map, so it keeps them.
   el.zoomBar.hidden = view === "notes";
+  // The flow diagram has no hand-placed nodes to hand back.
+  el.rearrange.hidden = view !== "map";
   if (view !== "flow") {
     el.flowBar.hidden = true;
     el.flowEmpty.hidden = true;
